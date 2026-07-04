@@ -1,3 +1,0 @@
-protocol : pour lire ou envoyer du JSON (comme pour la commande LOOK ou STATUS), on utilise des structures (struct).
-Au lieu de définir la structure de la pièce une fois dans le dossier server/ et une deuxième fois dans le dossier client-gui/,
-vous la définissez une seule fois ici. Le serveur et les clients importeront ce dossier partagé.
