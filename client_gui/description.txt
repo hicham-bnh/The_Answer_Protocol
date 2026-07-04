@@ -1,0 +1,7 @@
+main : Il utilise un framework graphique (comme Fyne). Il crée une fenêtre découpée en plusieurs zones :
+
+Un composant texte qui affiche la description de la pièce courante (reçue via le JSON de la commande LOOK).
+
+Des boutons cliquables (Nord, Sud, Attaquer, Prendre) qui envoient automatiquement les commandes textuelles au serveur en tâche de fond.
+
+Une zone de Chat avec des onglets séparés (Global, Room, Group) pour filtrer les événements EVT CHAT poussés par le serveur.

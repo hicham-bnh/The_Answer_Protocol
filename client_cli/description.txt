@@ -1,0 +1,5 @@
+main : Il se connecte en TCP au serveur. Son code est divisé en deux tâches asynchrones :
+
+Le thread principal attend que l'utilisateur tape une commande au clavier et l'envoie telle quelle sur la socket TCP.
+
+Une goroutine tourne en tâche de fond pour écouter la socket TCP et afficher instantanément à l'écran les messages ou les événements (EVT) envoyés par le serveur, sans bloquer la saisie de l'utilisateur.

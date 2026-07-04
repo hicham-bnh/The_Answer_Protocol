@@ -1,0 +1,2 @@
+world.yaml ou world.json : C'est le fichier texte qui décrit la carte. Il liste les 8 pièces, leurs descriptions, quelles pièces sont connectées entre elles (les sorties Nord/Sud/Est/Ouest),
+l'emplacement initial des 4 objets, et les caractéristiques des 3 PNJ (PV, dialogues, type d'ennemi ou de donneur de quête).

@@ -1,0 +1,9 @@
+main : Le point d'entrée. Il lit le fichier de configuration dans config/, valide la carte, ouvre la socket TCP (ex: sur le port 8080) et écoute en boucle l'arrivée de nouveaux clients.
+
+client : Gère le cycle de vie de chaque joueur connecté. Dès qu'un joueur se connecte, une goroutine dédiée est créée ici pour lire ses messages TCP, gérer la fragmentation ou le collage des paquets, et nettoyer son état s'il se déconnecte brutalement.
+
+game : Contient la logique des pièces et des mouvements. C'est ici qu'est traitée la commande LOOK (génération du JSON) et MOVE. C'est aussi ici que réside le système de Broadcast (le fait d'envoyer un événement EVT à tous les joueurs d'une même pièce).
+
+combat : Contient vos règles de RPG pour la commande ATTACK. Il calcule les dégâts infligés au PNJ, gère la contre-attaque automatique du monstre, met à jour les PV, et téléporte le joueur dans une zone sûre s'il tombe à 0 PV.
+
+logger : Assure la sécurité et la surveillance. Il écrit les logs du serveur au format JSON et contient l'algorithme d'anti-flood (détection et bannissement temporaire des clients qui envoient trop de requêtes par seconde).
