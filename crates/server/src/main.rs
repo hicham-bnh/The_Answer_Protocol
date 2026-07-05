@@ -1,13 +1,21 @@
-use std::io::{Read, Write};
+use std::io::{Write, BufReader, BufRead};
 use std::net::{TcpListener, TcpStream};
+mod protocol {
+    pub mod command;
+}
+use protocol::command::parse_command;
+
 
 fn connect_client(mut stream: TcpStream){
-    let mut buffer = [0; 1024];
-    stream.read(&mut buffer).expect("Fail de lecture");
-    let request = String::from_utf8_lossy(&buffer[..]);
-    println!("ca marche: {}", request);
-    let reponse = "hello, client".as_bytes();
-    stream.write(reponse).expect("Failder to write reponse");
+    let stream_clone = stream.try_clone().expect("clone");
+    let read_buf = BufReader::new(stream_clone);
+    stream.write_all(b"OK hello proto=1\n").expect("Failder to write reponse");
+    for line in read_buf.lines(){
+        let line = line.expect("erreur de lecture");
+        println!("{}", line);
+        parse_command(&line, &mut stream);
+        //let reponse = "hello, client".as_bytes();
+    }
 }
 
 fn main(){
