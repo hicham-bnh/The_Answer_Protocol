@@ -20,7 +20,6 @@ fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashSet<String>>>){
         println!("client try: {}", line);
         if !is_connect{
             is_connect = connect_user(&line, &mut stream, &players);
-            println!("{:?}", is_connect);
             continue;
         }
         parse_command(&line, &mut stream);

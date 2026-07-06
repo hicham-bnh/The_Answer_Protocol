@@ -19,7 +19,6 @@ pub fn connect_user(line: &str, stream: &mut TcpStream, players: &Arc<Mutex<Hash
                 else {
                     guard.insert(name.to_string());
                     stream.write_all(b"OK connected\n").expect("write failed");
-                    Some(name.to_string());
                     return true;
                 }
             }
