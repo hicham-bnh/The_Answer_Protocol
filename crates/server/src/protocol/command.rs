@@ -54,7 +54,7 @@ pub fn parse_command(line: &str, stream: &mut TcpStream) {
              stream.write_all(b"you are connect yet\n").expect("Failder to write reponse");
         }
         Some("LOOK") => {
-            stream.write_all(b"OK\n").expect("Failder to write reponse");
+            stream.write_all(b"OK {room: example}\n").expect("Failder to write reponse");
             println!("USER USE LOOK");
         }
         Some("MOVE") => {
