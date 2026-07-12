@@ -1,0 +1,212 @@
+# world.yaml — Monde de travail temporaire (RPG vanilla)
+# Conforme aux exigences du sujet TAP :
+#   - 9 pièces interconnectées formant une boucle + 1 branche optionnelle (la crypte)
+#   - 4 PNJ, 3 rôles distincts : dialogue (guard), donneur de quête (elder, blacksmith), ennemi (goblin)
+#   - 5 objets, dont 3 obtenables en jeu (herbs, sword, mushroom)
+#   - 2 quêtes : fetch (rapporter des herbes) et kill (tuer le gobelin)
+#
+# Plan de la carte :
+#
+#            [tavern]
+#               |
+#   [forge] - [square] - [market]
+#      |         |          |
+#   [gate] -- [road] --- [forest]
+#                |
+#             [cave] --- [crypt]   <- crypt = branche optionnelle (cul-de-sac)
+#
+# Boucle principale : square -> market -> forest -> road -> gate -> forge -> square
+
+world:
+  start_location: "loc.square"     # pièce d'apparition des joueurs
+  respawn_location: "loc.square"   # pièce de respawn après une mort (0 HP)
+
+  locations:
+    loc.square:
+      name: "Village Square"
+      description: "The heart of the village. A stone fountain gurgles in the center, surrounded by cobblestone paths."
+      exits:
+        north: "loc.tavern"
+        east: "loc.market"
+        west: "loc.forge"
+        south: "loc.road"
+      items: []
+      npcs: ["npc.guard"]
+
+    loc.tavern:
+      name: "The Rusty Tankard"
+      description: "A warm tavern smelling of ale and stew. A fire crackles in the hearth."
+      exits:
+        south: "loc.square"
+      items: ["item.ale"]
+      npcs: ["npc.elder"]
+
+    loc.market:
+      name: "Market Street"
+      description: "Colorful stalls line the street. Merchants shout their prices over the crowd."
+      exits:
+        west: "loc.square"
+        south: "loc.forest"
+      items: []
+      npcs: []
+
+    loc.forge:
+      name: "The Old Forge"
+      description: "Heat radiates from the furnace. Hammers, tongs and half-finished blades cover the workbench."
+      exits:
+        east: "loc.square"
+        south: "loc.gate"
+      items: ["item.sword"]
+      npcs: ["npc.blacksmith"]
+
+    loc.gate:
+      name: "Village Gate"
+      description: "A heavy wooden gate marks the edge of the village. The road beyond disappears into the mist."
+      exits:
+        north: "loc.forge"
+        east: "loc.road"
+      items: []
+      npcs: []
+
+    loc.road:
+      name: "Old Road"
+      description: "A dusty road connecting the village to the wilds. Cart tracks are carved deep into the dirt."
+      exits:
+        north: "loc.square"
+        west: "loc.gate"
+        east: "loc.forest"
+        south: "loc.cave"
+      items: []
+      npcs: []
+
+    loc.forest:
+      name: "Whispering Forest"
+      description: "Tall pines block most of the sunlight. Wild herbs grow between the mossy roots."
+      exits:
+        north: "loc.market"
+        west: "loc.road"
+      items: ["item.herbs"]
+      npcs: []
+
+    loc.cave:
+      name: "Damp Cave"
+      description: "Water drips from the ceiling. Something growls in the darkness."
+      exits:
+        north: "loc.road"
+        east: "loc.crypt"
+      items: ["item.mushroom"]
+      npcs: ["npc.goblin"]
+
+    # Branche optionnelle (cul-de-sac) exigée par le sujet
+    loc.crypt:
+      name: "Forgotten Crypt"
+      description: "Ancient tombs covered in dust. Nobody has set foot here in decades."
+      exits:
+        west: "loc.cave"
+      items: ["item.ancient_altar"]
+      npcs: []
+
+items:
+  item.herbs:
+    name: "Healing Herbs"
+    description: "A bundle of fragrant herbs said to cure most ailments."
+    obtainable: true
+
+  item.sword:
+    name: "Iron Sword"
+    description: "A plain but solid iron sword, fresh from the forge."
+    obtainable: true
+
+  item.mushroom:
+    name: "Glowing Mushroom"
+    description: "A faintly luminescent mushroom growing in the dark."
+    obtainable: true
+
+  item.ale:
+    name: "Frothy Ale"
+    description: "A cold mug of the tavern's finest ale."
+    obtainable: true
+
+  # Objet non obtenable : décor interactif (LOOK le montre, TAKE doit échouer)
+  item.ancient_altar:
+    name: "Ancient Altar"
+    description: "A massive stone altar carved with unreadable runes. Far too heavy to move."
+    obtainable: false
+
+npcs:
+  # Rôle 1 : dialogue simple
+  npc.guard:
+    name: "Village Guard"
+    role: "dialogue"
+    hostile: false
+    description: "A stern guard in worn chainmail, keeping an eye on the square."
+    dialogue:
+      - "Stay out of trouble, traveler."
+      - "The cave south of the old road is dangerous. A goblin lurks there."
+      - "The elder in the tavern is looking for help."
+    stats:
+      hp: 50
+
+  # Rôle 2 : donneur de quête (fetch)
+  npc.elder:
+    name: "Village Elder"
+    role: "quest_giver"
+    hostile: false
+    description: "An old man with a long white beard, sipping tea by the fire."
+    dialogue:
+      - "My bones ache, young one. I could use some healing herbs from the forest."
+      - "Have you found those herbs yet?"
+    quests: ["quest.fetch_herbs"]
+    stats:
+      hp: 30
+
+  # Rôle 2 bis : donneur de quête (kill)
+  npc.blacksmith:
+    name: "Blacksmith"
+    role: "quest_giver"
+    hostile: false
+    description: "A broad-shouldered woman hammering a glowing blade."
+    dialogue:
+      - "That goblin in the cave stole my best tools. Someone should teach it a lesson."
+      - "Take the sword on the bench if you plan to fight it."
+    quests: ["quest.slay_goblin"]
+    stats:
+      hp: 60
+
+  # Rôle 3 : ennemi
+  npc.goblin:
+    name: "Cave Goblin"
+    role: "enemy"
+    hostile: true
+    description: "A snarling green creature clutching a stolen hammer."
+    dialogue:
+      - "Grrr! Mine! All mine!"
+    stats:
+      hp: 30
+      damage: 8        # dégâts de sa contre-attaque
+    respawn_seconds: 60  # réapparaît après sa mort (à ajuster selon vos choix de design)
+
+quests:
+  # Quête 1 : fetch item (aller chercher un objet et le rapporter)
+  quest.fetch_herbs:
+    name: "Herbs for the Elder"
+    giver: "npc.elder"
+    type: "fetch"
+    description: "Bring Healing Herbs from the Whispering Forest to the Village Elder."
+    objective:
+      item: "item.herbs"
+      deliver_to: "npc.elder"
+    reward:
+      item: "item.ale"   # l'elder vous offre une bière, quête vanilla oblige
+
+  # Quête 2 : defeat NPC (tuer un ennemi)
+  quest.slay_goblin:
+    name: "Goblin Trouble"
+    giver: "npc.blacksmith"
+    type: "kill"
+    description: "Defeat the Cave Goblin lurking in the Damp Cave."
+    objective:
+      target: "npc.goblin"
+      count: 1
+    reward:
+      item: "item.sword"
