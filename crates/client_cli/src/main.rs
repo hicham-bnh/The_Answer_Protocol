@@ -1,10 +1,11 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
+use std::thread;
 
 fn main() {
     println!("Tentative de connexion au serveur...");
 
-    let mut stream = match TcpStream::connect("127.0.0.1:8080") {
+    let stream = match TcpStream::connect("127.0.0.1:8080") {
         Ok(s) => {
             println!("Connexion réussie !");
             s
@@ -14,23 +15,25 @@ fn main() {
             return;
         }
     };
-    let stream_clone = stream.try_clone().expect("clone failed");
-    let mut reader = BufReader::new(stream_clone);
-    // Lire la greeting envoyée par le serveur
-    let mut greeting = String::new();
-    reader.read_line(&mut greeting).expect("erreur de lecture greeting");
-    print!("S: {}", greeting);
-    //// Envoyer une commande CONNECT
-    //let cmd = "TEST alice\n";
-    //stream.write_all(cmd.as_bytes()).expect("erreur d'écriture");
-    //println!("Envoyé: {}", cmd.trim());
 
-    //// Lire la réponse à CONNECT
-    //let mut response = String::new();
-    //reader.read_line(&mut response).expect("erreur de lecture réponse");
-    //print!("Serveur dit: {}", response);
+    let mut write_stream = stream.try_clone().expect("clone failed");
+    let read_stream = stream.try_clone().expect("clone failed");
 
-    // Boucle interactive : tape des commandes au clavier
+    // Thread dédié : lit en continu tout ce qui vient du serveur, et l'affiche
+    thread::spawn(move || {
+        let reader = BufReader::new(read_stream);
+        for line in reader.lines() {
+            match line {
+                Ok(l) => println!("S: {}", l),
+                Err(_) => {
+                    println!("Serveur déconnecté.");
+                    break;
+                }
+            }
+        }
+    });
+
+    // Thread principal : lit le clavier et envoie au serveur, sans attendre de réponse
     let stdin = std::io::stdin();
     loop {
         let mut input = String::new();
@@ -39,14 +42,8 @@ fn main() {
         if input.is_empty() {
             continue;
         }
-        stream.write_all(format!("{}\n", input).as_bytes()).expect("erreur d'écriture");
-        let mut response = String::new();
-        if reader.read_line(&mut response).unwrap_or(0) == 0 {
-            println!("Serveur déconnecté.");
-            break;
-        }
-        print!("S: {}", response);
-        if response == "OK bye\n" {
+        write_stream.write_all(format!("{}\n", input).as_bytes()).expect("erreur d'écriture");
+        if input == "QUIT" {
             break;
         }
     }

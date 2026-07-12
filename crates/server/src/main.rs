@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::io::{Write, BufReader, BufRead};
 use std::net::{TcpListener, TcpStream};
 
@@ -10,8 +10,9 @@ use protocol::command::parse_command;
 use protocol::command::connect_user;
 
 
-fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashSet<String>>>){
+fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, TcpStream>>>){
     let mut is_connect = false;
+    let mut name = String::new();
     let stream_clone = stream.try_clone().expect("clone");
     let read_buf = BufReader::new(stream_clone);
     stream.write_all(b"OK hello proto=1\n").expect("Failder to write reponse");
@@ -19,10 +20,10 @@ fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashSet<String>>>){
         let line = line.expect("erreur de lecture");
         println!("client try: {}", line);
         if !is_connect{
-            is_connect = connect_user(&line, &mut stream, &players);
+            (is_connect, name) = connect_user(&line, &mut stream, &players);
             continue;
         }
-        parse_command(&line, &mut stream);
+        parse_command(&line, &mut stream, &players, &name);
         //let reponse = "hello, client".as_bytes();
     }
 }
@@ -30,7 +31,7 @@ fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashSet<String>>>){
 fn main(){
     let listener = TcpListener::bind("127.0.0.1:8080").expect("failde to bind");
     println!("Server run");
-    let players: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+    let players: Arc<Mutex<HashMap<String, TcpStream>>> = Arc::new(Mutex::new(HashMap::new()));
     for stream in listener.incoming(){
         match stream{
             Ok(stream) => {
