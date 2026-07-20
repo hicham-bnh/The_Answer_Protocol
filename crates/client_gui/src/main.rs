@@ -1,13 +1,10 @@
-use std::net::TcpStream;
+struct TapClient {
+    server_adress: String
+}
 
-fn main() {
-    println!("Tentative de connexion au serveur...");
-    match TcpStream::connect("127.0.0.1:8080") {
-        Ok(_) => {
-            println!("Connexion au serveur réussie !");
-        }
-        Err(e) => {
-            println!("La connexion au serveur a échoué : {}", e);
-        }
-    }
+fn main(){
+    let client = TapClient{
+        server_adress: String::from("127.0.0.1:8080")
+    };
+    println!("Adresse du serveur : {}", client.server_adress);
 }
