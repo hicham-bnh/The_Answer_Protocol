@@ -12,6 +12,7 @@ use protocol::command::connect_user;
 
 fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, TcpStream>>>){
     let mut is_connect = false;
+    // let mut quit = false;
     let mut name = String::new();
     let stream_clone = stream.try_clone().expect("clone");
     let read_buf = BufReader::new(stream_clone);
