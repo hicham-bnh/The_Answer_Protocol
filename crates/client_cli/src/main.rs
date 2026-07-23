@@ -17,12 +17,12 @@ fn main() {
                     let mut buf_reception = [0u8; 512];
                     let n = match stream_lecture.read(&mut buf_reception) {
                         Ok(0) => {
-                            println!("Serveur déconnecté");
+                            println!("Server deconnected");
                             break;
                         }
                         Ok(n) => n,
                         Err(e) => {
-                            println!("erreur lecture : {e}");
+                            println!("erreur reading : {e}");
                             break;
                         }
                     };
@@ -49,7 +49,7 @@ fn main() {
             let _ = handle.join();
         }
         Err(e) => {
-            println!("La connexion au serveur a échoué : {}", e);
+            println!("errer conection to the server : {}", e);
         }
     }
 }
