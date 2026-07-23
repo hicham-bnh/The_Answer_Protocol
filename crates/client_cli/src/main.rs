@@ -8,7 +8,7 @@ use std::io::{stdin, Read};
 
 
 fn main() {
-    println!("Tentative de connexion au serveur...");
+    println!("Try to connect to the serveur...");
     match TcpStream::connect("127.0.0.1:8080") {
         Ok(mut stream) => {
             let mut stream_lecture = stream.try_clone().expect("clone failed");
@@ -17,12 +17,12 @@ fn main() {
                     let mut buf_reception = [0u8; 512];
                     let n = match stream_lecture.read(&mut buf_reception) {
                         Ok(0) => {
-                            println!("Serveur déconnecté");
+                            println!("Server deconnected");
                             break;
                         }
                         Ok(n) => n,
                         Err(e) => {
-                            println!("erreur lecture : {e}");
+                            println!("erreur reading : {e}");
                             break;
                         }
                     };
@@ -49,7 +49,7 @@ fn main() {
             let _ = handle.join();
         }
         Err(e) => {
-            println!("La connexion au serveur a échoué : {}", e);
+            println!("errer conection to the server : {}", e);
         }
     }
 }
