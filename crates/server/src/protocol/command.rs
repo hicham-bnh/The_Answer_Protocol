@@ -38,7 +38,7 @@ pub fn connect_user(line: &str, stream: &mut TcpStream, players: &Arc<Mutex<Hash
             println!("COMMANDE ERROR: {}", cmd_inconnue);
             return (false, String::new());
         }
-        None => {
+        _none => {
             stream.write_all(b"ERROR COMMANDE\n").expect("Failder to write reponse");
             println!("COMMANDE ERROR");
             return (false, String::new());
@@ -123,13 +123,13 @@ pub fn parse_command(line: &str, stream: &mut TcpStream, players: &Arc<Mutex<Has
             stream.write_all(b"OK\n").expect("Failder to write reponse");
             println!("USER USE LOOK");
         }
-        None => {
-            stream.write_all(b"ERROR COMMANDE\n").expect("Failder to write reponse");
-            println!("COMMANDE ERROR");
-        }
         Some(cmd_inconnue) => {
             stream.write_all(b"ERROR COMMANDE\n").expect("Failder to write reponse");
             println!("COMMANDE ERROR: {}", cmd_inconnue);
+        }
+        _none => {
+            stream.write_all(b"ERROR COMMANDE\n").expect("Failder to write reponse");
+            println!("COMMANDE ERROR");
         }
     }
 }
