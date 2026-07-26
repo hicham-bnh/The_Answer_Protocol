@@ -2,6 +2,8 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::io::{Write, BufReader, BufRead};
 use std::net::{TcpListener, TcpStream};
+use std::fs;
+
 
 mod protocol {
     pub mod command;
@@ -9,6 +11,11 @@ mod protocol {
 use protocol::command::parse_command;
 use protocol::command::connect_user;
 
+
+fn parse_world() {
+    let world = fs::read_to_string("config/world.yaml") .expect("Impossible de lire world.yaml");
+    println!("{}", world);
+}
 
 fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, TcpStream>>>){
     let mut is_connect = false;
@@ -25,12 +32,12 @@ fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, TcpStream>>>)
             continue;
         }
         parse_command(&line, &mut stream, &players, &name);
-        //let reponse = "hello, client".as_bytes();
     }
 }
 
 fn main(){
     let listener = TcpListener::bind("127.0.0.1:8080").expect("failde to bind");
+    parse_world();
     println!("Server run");
     let players: Arc<Mutex<HashMap<String, TcpStream>>> = Arc::new(Mutex::new(HashMap::new()));
     for stream in listener.incoming(){

@@ -2,11 +2,6 @@ use std::net::TcpStream;
 use std::io::Write;
 use std::io::{stdin, Read};
 
-// fn client_connection(mut stream: TcpStream) {
-//     let mut buf = String::new();
-// }
-
-
 fn main() {
     println!("Try to connect to the serveur...");
     match TcpStream::connect("127.0.0.1:8080") {
