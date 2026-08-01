@@ -74,7 +74,7 @@ struct World {
 }
 
 #[derive(Debug, Deserialize)]
-struct GameWorld {
+pub struct GameWorld {
     world: World,
     items: HashMap<String, Item>,
     npcs: HashMap<String, Npc>,

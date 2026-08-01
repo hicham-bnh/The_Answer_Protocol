@@ -8,13 +8,18 @@ use std::fs;
 mod protocol {
     pub mod command;
 }
+mod world_struct {
+    pub mod world_struct;   
+}
 use protocol::command::parse_command;
 use protocol::command::connect_user;
+use world_struct::world_struct::GameWorld;
 
 
 fn parse_world() {
     let world = fs::read_to_string("config/world.yaml") .expect("Impossible de lire world.yaml");
-    println!("{}", world);
+    let game_world: GameWorld = serde_yaml::from_str(&world).expect("ERROR SERDE");
+    println!("{:?}", game_world);
 }
 
 fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, TcpStream>>>){
