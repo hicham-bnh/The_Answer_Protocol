@@ -258,10 +258,10 @@ impl TapClient {
 impl eframe::App for TapClient {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        TapClient::top_panel(self, ui);
-        TapClient::left_panel(self, ui);
-        TapClient::right_panel(self, ui);
-        TapClient::bottom_panel(self, ui);
-        TapClient::central_panel(self, ui);
+        self.top_panel(ui);
+        self.left_panel(ui);
+        self.right_panel(ui);
+        self.bottom_panel(ui);
+        self.central_panel(ui);
     }
 }
