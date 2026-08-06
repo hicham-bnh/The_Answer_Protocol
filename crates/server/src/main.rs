@@ -11,20 +11,24 @@ mod protocol {
 mod world_struct {
     pub mod world_struct;   
 }
+
+pub struct Player {
+    pub stream: TcpStream,
+    pub room: String,
+}
 use protocol::command::parse_command;
 use protocol::command::connect_user;
 use world_struct::world_struct::GameWorld;
 
 
-fn parse_world() {
+fn parse_world() -> GameWorld {
     let world = fs::read_to_string("config/world.yaml") .expect("Impossible de lire world.yaml");
     let game_world: GameWorld = serde_yaml::from_str(&world).expect("ERROR SERDE");
-    println!("{:?}", game_world);
+    game_world
 }
 
-fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, TcpStream>>>){
+fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, Player>>>, spawn_room: String){
     let mut is_connect = false;
-    // let mut quit = false;
     let mut name = String::new();
     let stream_clone = stream.try_clone().expect("clone");
     let read_buf = BufReader::new(stream_clone);
@@ -33,7 +37,7 @@ fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, TcpStream>>>)
         let line = line.expect("erreur de lecture");
         println!("client try: {}", line);
         if !is_connect{
-            (is_connect, name) = connect_user(&line, &mut stream, &players);
+            (is_connect, name) = connect_user(&line, &mut stream, &players, spawn_room.clone());
             continue;
         }
         parse_command(&line, &mut stream, &players, &name);
@@ -42,14 +46,16 @@ fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, TcpStream>>>)
 
 fn main(){
     let listener = TcpListener::bind("127.0.0.1:8080").expect("failde to bind");
-    parse_world();
+    let game_world = parse_world();
+    let spawn_room = game_world.world.start_location.clone();
     println!("Server run");
-    let players: Arc<Mutex<HashMap<String, TcpStream>>> = Arc::new(Mutex::new(HashMap::new()));
+    let players: Arc<Mutex<HashMap<String, Player>>> = Arc::new(Mutex::new(HashMap::new()));
     for stream in listener.incoming(){
         match stream{
             Ok(stream) => {
                 let players_clone = Arc::clone(&players);
-                std::thread::spawn(|| lunch(stream, players_clone));
+                 let value = spawn_room.clone();
+                std::thread::spawn(move || lunch(stream, players_clone, value.clone()));
             }
             Err(e) => {
                 eprintln!("Failde to conection: {}", e);
