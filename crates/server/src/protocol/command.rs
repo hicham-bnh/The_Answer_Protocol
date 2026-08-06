@@ -2,9 +2,15 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::net::TcpStream;
 use std::io::Write;
+use crate::Player;
 
 
-pub fn connect_user(line: &str, stream: &mut TcpStream, players: &Arc<Mutex<HashMap<String, TcpStream>>>) -> (bool, String){
+pub fn connect_user(
+    line: &str,
+    stream: &mut TcpStream,
+    players: &Arc<Mutex<HashMap<String, Player>>>, 
+    spawn_room: String
+    ) -> (bool, String){
     let mut args = line.splitn(2, ' ');
     let mut name = String::new();
     let mut guard = players.lock().unwrap();
@@ -18,7 +24,11 @@ pub fn connect_user(line: &str, stream: &mut TcpStream, players: &Arc<Mutex<Hash
                 }
                 else {
                     let stream_for_map = stream.try_clone().expect("clone failed");
-                    guard.insert(name.clone(), stream_for_map);
+                    let player = Player {
+                        stream: stream_for_map,
+                        room: spawn_room.to_string()
+                    };
+                    guard.insert(name.clone(), player);
                     stream.write_all(b"OK connected\n").expect("write failed");
                     return (true, name);
                 }
@@ -48,14 +58,20 @@ pub fn connect_user(line: &str, stream: &mut TcpStream, players: &Arc<Mutex<Hash
 
 
 
-pub fn parse_command(line: &str, stream: &mut TcpStream, players: &Arc<Mutex<HashMap<String, TcpStream>>>, name: &str) {
+pub fn parse_command(line: &str, stream: &mut TcpStream, players: &Arc<Mutex<HashMap<String, Player>>>, name: &str) {
     let mut args = line.splitn(2, ' ');
     match args.next(){
         Some("CONNECT") => {
             stream.write_all(b"you are connect yet\n").expect("Failder to write reponse");
         }
         Some("LOOK") => {
-            stream.write_all(b"OK {room: example}\n").expect("Failder to write reponse");
+            let mut guard = players.lock().unwrap();
+            for (_client_name, client_steam) in guard.iter_mut(){
+                if _client_name == name {
+                    let msg = format!("OK {{{}}}\n", client_steam.room);
+                    client_steam.stream.write_all(msg.as_bytes()).expect("Failder to write reponse");
+                }
+            }
             println!("USER USE LOOK");
         }
         Some("MOVE") => {
@@ -78,7 +94,7 @@ pub fn parse_command(line: &str, stream: &mut TcpStream, players: &Arc<Mutex<Has
                 for (_client_name, client_steam) in guard.iter_mut()
                 {
                     let msg = format!("EVT GLOBAL CHAT {} {}\n", name, chat_msg);
-                    client_steam.write_all(msg.as_bytes()).expect("write failed");
+                    client_steam.stream.write_all(msg.as_bytes()).expect("write failed");
                 }
             }
             println!("{} USE CHAT", name);

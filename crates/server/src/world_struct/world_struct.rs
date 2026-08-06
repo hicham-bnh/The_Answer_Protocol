@@ -67,15 +67,15 @@ struct Reward {
 }
 
 #[derive(Debug, Deserialize)]
-struct World {
-    start_location: String,
+pub struct World {
+    pub start_location: String,
     respawn_location: String,
     locations: HashMap<String, Location>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct GameWorld {
-    world: World,
+    pub world: World,
     items: HashMap<String, Item>,
     npcs: HashMap<String, Npc>,
     quests: HashMap<String, Quest>
