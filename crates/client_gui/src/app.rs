@@ -1,7 +1,7 @@
 use eframe::egui;
 use crate::state::{prettify, ChatTab, Room};
+use std::sync::mpsc::Receiver;
 
-#[derive(Default)]
 pub struct TapClient {
     server_address: String,
     username: String,
@@ -20,17 +20,34 @@ pub struct TapClient {
     logs: Vec<String>,
     active_tab: ChatTab,
     chat_input: String,
+    rx: Receiver<String>
 }
 
 impl TapClient {
-    fn new(address: String) -> TapClient {
+    fn new(address: String, rx: Receiver<String>) -> TapClient {
         TapClient {
             server_address: address,
-            ..Default::default()
+            username: String::new(),
+            room: None,
+            players: Vec::new(),
+            server_players: 0,
+            items: Vec::new(),
+            npcs: Vec::new(),
+            inventory: Vec::new(),
+            hp: 100,
+            max_hp: 100,
+            group: None,
+            chat_global: Vec::new(),
+            chat_room: Vec::new(),
+            chat_group: Vec::new(),
+            logs: Vec::new(),
+            active_tab: ChatTab::default(),
+            chat_input: String::new(),
+            rx,
         }
     }
 
-    pub fn fake() -> TapClient {
+    pub fn fake(rx: Receiver<String>) -> TapClient {
         use std::collections::HashMap;
 
         TapClient {
@@ -72,7 +89,7 @@ impl TapClient {
                 "Connected to 127.0.0.1:8080".to_string(),
                 "OK connected".to_string(),
             ],
-            ..TapClient::new("127.0.0.1:8080".to_string())
+            ..TapClient::new("127.0.0.1:8080".to_string(), rx)
         }
     }
 

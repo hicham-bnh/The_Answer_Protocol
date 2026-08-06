@@ -1,8 +1,10 @@
 use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
+use std::sync::mpsc::Sender;
+use std::thread;
 
-pub fn start(address: String) {
-    match TcpStream::connect(address) {
+pub fn start(address: String, tx: Sender<String>) {
+    thread::spawn(move || match TcpStream::connect(address) {
         Ok(stream) => {
             println!("Connected !");
             let reader = BufReader::new(stream);
@@ -16,5 +18,5 @@ pub fn start(address: String) {
             }
         }
         Err(e) => println!("Failed: {} !", e),
-    }
+    });
 }
