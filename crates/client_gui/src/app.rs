@@ -1,6 +1,6 @@
-use eframe::egui;
 use crate::state::{prettify, ChatTab, Room};
-use std::sync::mpsc::Receiver;
+use eframe::egui;
+use std::sync::mpsc::{Receiver, Sender};
 
 pub struct TapClient {
     server_address: String,
@@ -20,11 +20,12 @@ pub struct TapClient {
     logs: Vec<String>,
     active_tab: ChatTab,
     chat_input: String,
-    rx: Receiver<String>
+    rx: Receiver<String>,
+    tx_out: Sender<String>,
 }
 
 impl TapClient {
-    fn new(address: String, rx: Receiver<String>) -> TapClient {
+    fn new(address: String, rx: Receiver<String>, tx_out: Sender<String>) -> TapClient {
         TapClient {
             server_address: address,
             username: String::new(),
@@ -44,10 +45,11 @@ impl TapClient {
             active_tab: ChatTab::default(),
             chat_input: String::new(),
             rx,
+            tx_out
         }
     }
 
-    pub fn fake(rx: Receiver<String>) -> TapClient {
+    pub fn fake(rx: Receiver<String>, tx_out: Sender<String>) -> TapClient {
         use std::collections::HashMap;
 
         TapClient {
@@ -89,11 +91,22 @@ impl TapClient {
                 "Connected to 127.0.0.1:8080".to_string(),
                 "OK connected".to_string(),
             ],
-            ..TapClient::new("127.0.0.1:8080".to_string(), rx)
+            ..TapClient::new("127.0.0.1:8080".to_string(), rx, tx_out)
         }
     }
 
+    fn send_command(&mut self, cmd: String) {
+        let log_line = format!(">> {cmd}");
+        if self.tx_out.send(cmd).is_err() {
+            self.logs.push("(not connected)".to_string());
+            return
+        }
+        self.logs.push(log_line);
+    }
+
     fn top_panel(&mut self, ui: &mut egui::Ui) {
+        let mut pending: Option<String> = None;
+        
         egui::Panel::top("main_panel").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading(
@@ -113,12 +126,12 @@ impl TapClient {
                 if let Some(group) = &self.group {
                     ui.label(format!("Group: {group}"));
                     if ui.button("Leave").clicked() {
-                        self.logs.push("GROUP LEAVE".to_string());
+                        pending = Some("GROUP LEAVE".to_string());
                     }
                 } else {
                     ui.label("No group");
                     if ui.button("Create").clicked() {
-                        self.logs.push("GROUP CREATE".to_string());
+                        pending = Some("GROUP CREATE".to_string());
                     }
                 }
             });
@@ -129,15 +142,21 @@ impl TapClient {
                 let actions = ["LOOK", "STATUS", "INVENTORY", "WHO", "QUESTS", "QUIT"];
                 for action in actions {
                     if ui.button(egui::RichText::new(action).size(18.0)).clicked() {
-                        self.logs.push(action.to_string());
+                        pending = Some(action.to_string());
                     }
                 }
             });
             ui.add_space(8.0);
         });
+
+        if let Some(cmd) = pending {
+            self.send_command(cmd);
+        }
     }
 
     fn left_panel(&mut self, ui: &mut egui::Ui) {
+        let mut pending: Option<String> = None;
+        
         egui::Panel::left("room_panel")
             .default_size(300.0)
             .show(ui, |ui| {
@@ -154,7 +173,7 @@ impl TapClient {
                         ui.horizontal(|ui| {
                             ui.label(format!("{direction} -> {}", prettify(dest)));
                             if ui.button("Go").clicked() {
-                                self.logs.push(format!("MOVE {direction}"));
+                                pending = Some(format!("MOVE {direction}"));
                             }
                         });
                     }
@@ -165,8 +184,14 @@ impl TapClient {
                     for player in &self.players {
                         ui.horizontal(|ui| {
                             ui.label(player);
-                            if ui.add_enabled(self.group.is_some(), egui::Button::new("Invite to group")).clicked() {
-                                self.logs.push(format!("GROUP INVITE {player}"));
+                            if ui
+                                .add_enabled(
+                                    self.group.is_some(),
+                                    egui::Button::new("Invite to group"),
+                                )
+                                .clicked()
+                            {
+                                pending = Some(format!("GROUP INVITE {player}"));
                             }
                         });
                     }
@@ -178,7 +203,7 @@ impl TapClient {
                         ui.horizontal(|ui| {
                             ui.label(prettify(item));
                             if ui.button("Take").clicked() {
-                                self.logs.push(format!("TAKE {item}"));
+                                pending = Some(format!("TAKE {item}"));
                             }
                         });
                     }
@@ -190,13 +215,13 @@ impl TapClient {
                         ui.horizontal(|ui| {
                             ui.label(prettify(npc));
                             if ui.button("Talk").clicked() {
-                                self.logs.push(format!("TALK {npc}"));
+                                pending = Some(format!("TALK {npc}"));
                             }
                             if ui.button("Attack").clicked() {
-                                self.logs.push(format!("ATTACK {npc}"));
+                                pending = Some(format!("ATTACK {npc}"));
                             }
                             if ui.button("Quest").clicked() {
-                                self.logs.push(format!("QUEST {npc}"));
+                                pending = Some(format!("QUEST {npc}"));
                             }
                         });
                     }
@@ -206,7 +231,7 @@ impl TapClient {
                     ui.label("Username:");
                     ui.text_edit_singleline(&mut self.username);
                     if ui.button("Connect").clicked() {
-                        self.logs.push(format!("CONNECT {}", self.username));
+                        pending = Some(format!("CONNECT {}", self.username));
                     }
                 }
 
@@ -217,11 +242,14 @@ impl TapClient {
                     ui.horizontal(|ui| {
                         ui.label(prettify(item));
                         if ui.button("Drop").clicked() {
-                            self.logs.push(format!("DROP {item}"));
+                            pending = Some(format!("DROP {item}"));
                         }
                     });
                 }
             });
+        if let Some(cmd) = pending {
+            self.send_command(cmd);
+        }
     }
 
     fn right_panel(&mut self, ui: &mut egui::Ui) {
@@ -235,6 +263,8 @@ impl TapClient {
     }
 
     fn bottom_panel(&mut self, ui: &mut egui::Ui) {
+        let mut pending: Option<String> = None;
+        
         egui::Panel::bottom("chat_input").show(ui, |ui| {
             let response = ui.add(egui::TextEdit::singleline(&mut self.chat_input).char_limit(200));
             if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -243,11 +273,15 @@ impl TapClient {
                     ChatTab::Room => ("ROOM", &mut self.chat_room),
                     ChatTab::Group => ("GROUP", &mut self.chat_group),
                 };
-                self.logs.push(format!("CHAT {scope} {}", self.chat_input));
+                pending = Some(format!("CHAT {scope} {}", self.chat_input));
                 messages.push(format!("{}: {}", self.username, self.chat_input));
                 self.chat_input.clear();
             }
         });
+
+        if let Some(cmd) = pending {
+            self.send_command(cmd);
+        }
     }
 
     fn central_panel(&mut self, ui: &mut egui::Ui) {
@@ -273,8 +307,10 @@ impl TapClient {
 }
 
 impl eframe::App for TapClient {
-
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        while let Ok(line) = self.rx.try_recv() {
+            self.logs.push(format!("<< {}", line));
+        }
         self.top_panel(ui);
         self.left_panel(ui);
         self.right_panel(ui);
