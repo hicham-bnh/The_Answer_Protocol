@@ -2,81 +2,81 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
-struct Location {
-    name: String,
-    description: String,
-    exits: HashMap<String, String>,
-    items: Vec<String>,
-    npcs: Vec<String>
+pub struct Location {
+    pub name: String,
+    pub description: String,
+    pub exits: HashMap<String, String>,
+    pub items: Vec<String>,
+    pub npcs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct Item {
-    name: String,
-    description: String,
-    obtainable: bool
+pub struct Item {
+    pub name: String,
+    pub description: String,
+    pub obtainable: bool,
 }
 
 #[derive(Debug, Deserialize)]
-struct Npc {
-    name: String,
-    role: String,
-    hostile: bool,
-    description: String,
-    dialogue: Vec<String>,
+pub struct Npc {
+    pub name: String,
+    pub role: String,
+    pub hostile: bool,
+    pub description: String,
+    pub dialogue: Vec<String>,
     #[serde(default)]
-    quests: Vec<String>,
-    stats: Stats,   
+    pub quests: Vec<String>,
+    pub stats: Stats,   
     #[serde(default)]
-    respawn_seconds: Option<u32>
+    pub respawn_seconds: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
-struct Stats {
-    hp: u32,
+pub struct Stats {
+    pub hp: u32,
     #[serde(default)]
-    damage: Option<u32>
+    pub damage: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
-struct Quest {
-    name: String,
-    giver: String,
+pub struct Quest {
+    pub name: String,
+    pub giver: String,
     #[serde(rename = "type")]
-    quest_type: String,
-    description: String,
-    objective: Objective,
-    reward: Reward
+    pub quest_type: String,
+    pub description: String,
+    pub objective: Objective,
+    pub reward: Reward,
 }
 
 #[derive(Debug, Deserialize)]
-struct Objective {
+pub struct Objective {
     #[serde(default)]
-    item: Option<String>,
+    pub item: Option<String>,
     #[serde(default)]
-    deliver_to: Option<String>,
+    pub deliver_to: Option<String>,
     #[serde(default)]
-    target: Option<String>,
+    pub target: Option<String>,
     #[serde(default)]
-    count: Option<u32>,
+    pub count: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
-struct Reward {
-    item: String
+pub struct Reward {
+    pub item: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct World {
     pub start_location: String,
-    respawn_location: String,
-    locations: HashMap<String, Location>,
+    pub respawn_location: String,
+    pub locations: HashMap<String, Location>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct GameWorld {
     pub world: World,
-    items: HashMap<String, Item>,
-    npcs: HashMap<String, Npc>,
-    quests: HashMap<String, Quest>
+    pub items: HashMap<String, Item>,
+    pub npcs: HashMap<String, Npc>,
+    pub quests: HashMap<String, Quest>,
 }
