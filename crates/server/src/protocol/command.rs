@@ -4,6 +4,7 @@ use std::net::TcpStream;
 use std::io::Write;
 use crate::Player;
 
+use crate::world_struct::world_struct::GameWorld;
 
 pub fn connect_user(
     line: &str,
@@ -58,7 +59,13 @@ pub fn connect_user(
 
 
 
-pub fn parse_command(line: &str, stream: &mut TcpStream, players: &Arc<Mutex<HashMap<String, Player>>>, name: &str) {
+pub fn parse_command(
+    line: &str,
+    stream: &mut TcpStream,
+    players: &Arc<Mutex<HashMap<String, Player>>>,
+    name: &str,
+    world: &GameWorld
+    ) {
     let mut args = line.splitn(2, ' ');
     match args.next(){
         Some("CONNECT") => {
@@ -66,9 +73,26 @@ pub fn parse_command(line: &str, stream: &mut TcpStream, players: &Arc<Mutex<Has
         }
         Some("LOOK") => {
             let mut guard = players.lock().unwrap();
+            let mut room_str = String::new();
+            let mut players: Vec<String> = Vec::new();
             for (_client_name, client_steam) in guard.iter_mut(){
                 if _client_name == name {
-                    let msg = format!("OK {{{}}}\n", client_steam.room);
+                    room_str = client_steam.room.to_string();
+                }
+            }
+             for (_client_name, client_steam) in guard.iter_mut(){
+                 if client_steam.room.to_string() == room_str {
+                     players.push(name.to_string());
+                 }
+             }
+            for (_client_name, client_steam) in guard.iter_mut(){
+                if _client_name == name {
+                    let items = &world.world.locations.get(&room_str).unwrap().items;
+                    let npcs = &world.world.locations.get(&room_str).unwrap().npcs;
+                    let msg = format!(
+                        "OK {{ \"room\": {}, \"players\": {:?}, \"items\": {:?}, , \"npcs\": {:?} }}\n",
+                        room_str, players, items, npcs
+                    );
                     client_steam.stream.write_all(msg.as_bytes()).expect("Failder to write reponse");
                 }
             }

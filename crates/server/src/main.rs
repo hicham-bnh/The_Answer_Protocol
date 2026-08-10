@@ -27,7 +27,7 @@ fn parse_world() -> GameWorld {
     game_world
 }
 
-fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, Player>>>, spawn_room: String){
+fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, Player>>>, spawn_room: String, world: GameWorld){
     let mut is_connect = false;
     let mut name = String::new();
     let stream_clone = stream.try_clone().expect("clone");
@@ -40,7 +40,7 @@ fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, Player>>>, sp
             (is_connect, name) = connect_user(&line, &mut stream, &players, spawn_room.clone());
             continue;
         }
-        parse_command(&line, &mut stream, &players, &name);
+        parse_command(&line, &mut stream, &players, &name, &world);
     }
 }
 
@@ -54,8 +54,9 @@ fn main(){
         match stream{
             Ok(stream) => {
                 let players_clone = Arc::clone(&players);
-                 let value = spawn_room.clone();
-                std::thread::spawn(move || lunch(stream, players_clone, value.clone()));
+                let value = spawn_room.clone();
+                let game_world = parse_world();
+                std::thread::spawn(move || lunch(stream, players_clone, value.clone(), game_world));
             }
             Err(e) => {
                 eprintln!("Failde to conection: {}", e);
