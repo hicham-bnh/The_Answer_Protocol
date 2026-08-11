@@ -309,7 +309,8 @@ impl TapClient {
 impl eframe::App for TapClient {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         while let Ok(line) = self.rx.try_recv() {
-            self.logs.push(format!("<< {}", line));
+            let msg = crate::protocol::parse_line(&line);
+            self.logs.push(format!("{msg:?}"));
         }
         self.top_panel(ui);
         self.left_panel(ui);

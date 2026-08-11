@@ -4,6 +4,7 @@ use std::sync::mpsc;
 mod app;
 mod net;
 mod state;
+mod protocol;
 
 fn main() -> eframe::Result {
     let (tx, rx) = mpsc::channel::<String>();

@@ -7,7 +7,7 @@ pub struct Room {
     pub exits: HashMap<String, String>,
 }
 
-#[derive(Default, PartialEq, Clone)]
+#[derive(Default, PartialEq, Clone, Debug)]
 pub enum ChatTab {
     Global,
     #[default]
