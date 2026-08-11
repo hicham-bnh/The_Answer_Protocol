@@ -1,5 +1,7 @@
+use crate::protocol::{EvtType, ServerMsg};
 use crate::state::{prettify, ChatTab, Room};
 use eframe::egui;
+use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, Sender};
 
 pub struct TapClient {
@@ -20,6 +22,7 @@ pub struct TapClient {
     logs: Vec<String>,
     active_tab: ChatTab,
     chat_input: String,
+    pending_cmds: VecDeque<String>,
     rx: Receiver<String>,
     tx_out: Sender<String>,
 }
@@ -44,8 +47,9 @@ impl TapClient {
             logs: Vec::new(),
             active_tab: ChatTab::default(),
             chat_input: String::new(),
+            pending_cmds: VecDeque::new(),
             rx,
-            tx_out
+            tx_out,
         }
     }
 
@@ -97,16 +101,17 @@ impl TapClient {
 
     fn send_command(&mut self, cmd: String) {
         let log_line = format!(">> {cmd}");
-        if self.tx_out.send(cmd).is_err() {
+        if self.tx_out.send(cmd.clone()).is_err() {
             self.logs.push("(not connected)".to_string());
-            return
+            return;
         }
+        self.pending_cmds.push_back(cmd);
         self.logs.push(log_line);
     }
 
     fn top_panel(&mut self, ui: &mut egui::Ui) {
         let mut pending: Option<String> = None;
-        
+
         egui::Panel::top("main_panel").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading(
@@ -156,7 +161,7 @@ impl TapClient {
 
     fn left_panel(&mut self, ui: &mut egui::Ui) {
         let mut pending: Option<String> = None;
-        
+
         egui::Panel::left("room_panel")
             .default_size(300.0)
             .show(ui, |ui| {
@@ -264,7 +269,7 @@ impl TapClient {
 
     fn bottom_panel(&mut self, ui: &mut egui::Ui) {
         let mut pending: Option<String> = None;
-        
+
         egui::Panel::bottom("chat_input").show(ui, |ui| {
             let response = ui.add(egui::TextEdit::singleline(&mut self.chat_input).char_limit(200));
             if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -304,6 +309,38 @@ impl TapClient {
             });
         });
     }
+
+    fn apply(&mut self, msg: ServerMsg) {
+        match msg {
+            ServerMsg::Evt(evt) => match evt {
+                EvtType::Enter(username) => self.players.push(username),
+                EvtType::Leave(username) => self.players.retain(|x| x != &username),
+                EvtType::Chat(tab, username, message) => match tab {
+                    ChatTab::Global => self.chat_global.push(format!("{}: {}", username, message)),
+                    ChatTab::Room => self.chat_room.push(format!("{}: {}", username, message)),
+                    ChatTab::Group => self.chat_group.push(format!("{}: {}", username, message)),
+                },
+                EvtType::GroupInvite(leader) => {
+                    self.logs.push(format!(
+                        "Group invite from {leader} (GROUP JOIN {leader} to accept)"
+                    ));
+                }
+                EvtType::GroupJoin(username) => {
+                    self.chat_group
+                        .push(format!("* {username} joined the group"));
+                }
+                EvtType::GroupLeave(username) => {
+                    self.chat_group.push(format!("* {username} left the group"));
+                }
+                EvtType::PlayerCount(data) => self.server_players = data,
+            },
+            ServerMsg::Ok(data) => self.logs.push(format!("OK (unhandled): {data}")),
+            ServerMsg::Err(code, description) => {
+                self.logs.push(format!("{}: {}", code, description))
+            }
+            ServerMsg::Unknown(data) => self.logs.push(data.to_string()),
+        }
+    }
 }
 
 impl eframe::App for TapClient {
@@ -311,6 +348,7 @@ impl eframe::App for TapClient {
         while let Ok(line) = self.rx.try_recv() {
             let msg = crate::protocol::parse_line(&line);
             self.logs.push(format!("{msg:?}"));
+            self.apply(msg);
         }
         self.top_panel(ui);
         self.left_panel(ui);
