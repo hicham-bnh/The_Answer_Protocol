@@ -97,8 +97,38 @@ pub fn parse_command(
             println!("USER USE LOOK");
         }
         Some("MOVE") => {
-            let mut chat_args = args.next().expect("REASON").splitn(2, ' ');
-            stream.write_all(b"OK\n").expect("Failder to write reponse");
+            let Some(rest) = args.next() else {
+                    stream.write_all(b"ERR usage: MOVE <direction>\n").ok();
+                    println!("USER USE MOVE (missing arg)");
+                    return;
+                };
+            let mut chat_args = rest.splitn(2, ' ');
+            let move_to = chat_args.next().unwrap_or("");
+            let mut guard = players.lock().unwrap();
+            if let Some(player) = guard.get_mut(name) {
+                let room_str = player.room.clone();
+                let exists = &world.world.locations.get(&room_str).unwrap().exits;
+                if let Some(room_to) = exists.get(move_to) {
+                    let room_to = room_to.clone();
+                    let msg = format!("OK room={}\n", room_to);
+                    stream.write_all(msg.as_bytes()).expect("Failder to write reponse");
+                    player.room = room_to.clone();
+                    for (_client_name, client_steam) in guard.iter_mut(){
+                         if client_steam.room.to_string() == room_str {
+                             let msg_evnt_leave = format!("EVT ROOM PRESENCE LEAVE {}\n", name);
+                             client_steam.stream.lock().unwrap().write_all(msg_evnt_leave.as_bytes()).expect("ERROR");
+                        }
+                        else if client_steam.room.to_string() == room_to {
+                            let msg_evnt_enter = format!("EVT ROOM PRESENCE ENTER {}\n", name);
+                            client_steam.stream.lock().unwrap().write_all(msg_evnt_enter.as_bytes()).expect("ERROR");
+                        }
+                     }
+                }
+                else {
+                    stream.write_all(b"ERR 301 NO_EXIT\n").ok();
+                    return;
+                }
+            }
             println!("USER USE MOVE");
         }
         Some("QUIT") => {
