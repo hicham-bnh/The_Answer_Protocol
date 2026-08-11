@@ -13,8 +13,9 @@ mod world_struct {
 }
 
 pub struct Player {
-    pub stream: TcpStream,
+    pub stream: Mutex<TcpStream>,
     pub room: String,
+    pub name: String
 }
 use protocol::command::parse_command;
 use protocol::command::connect_user;
