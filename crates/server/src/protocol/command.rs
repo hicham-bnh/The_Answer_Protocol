@@ -26,8 +26,9 @@ pub fn connect_user(
                 else {
                     let stream_for_map = stream.try_clone().expect("clone failed");
                     let player = Player {
-                        stream: stream_for_map,
-                        room: spawn_room.to_string()
+                        stream: Mutex::new(stream_for_map),
+                        room: spawn_room.to_string(),
+                        name: name.to_string()
                     };
                     guard.insert(name.clone(), player);
                     stream.write_all(b"OK connected\n").expect("write failed");
@@ -75,30 +76,28 @@ pub fn parse_command(
             let mut guard = players.lock().unwrap();
             let mut room_str = String::new();
             let mut players: Vec<String> = Vec::new();
-            for (_client_name, client_steam) in guard.iter_mut(){
-                if _client_name == name {
-                    room_str = client_steam.room.to_string();
-                }
+            if let Some(player) = guard.get(name) {
+                room_str = player.room.clone();
             }
-             for (_client_name, client_steam) in guard.iter_mut(){
+            for (_client_name, client_steam) in guard.iter_mut(){
                  if client_steam.room.to_string() == room_str {
-                     players.push(name.to_string());
+                     players.push(_client_name.to_string());
                  }
              }
-            for (_client_name, client_steam) in guard.iter_mut(){
-                if _client_name == name {
-                    let items = &world.world.locations.get(&room_str).unwrap().items;
-                    let npcs = &world.world.locations.get(&room_str).unwrap().npcs;
-                    let msg = format!(
-                        "OK {{ \"room\": {}, \"players\": {:?}, \"items\": {:?}, , \"npcs\": {:?} }}\n",
-                        room_str, players, items, npcs
-                    );
-                    client_steam.stream.write_all(msg.as_bytes()).expect("Failder to write reponse");
-                }
+             if let Some(player) = guard.get(name) {
+                let items = &world.world.locations.get(&room_str).unwrap().items;
+                let npcs = &world.world.locations.get(&room_str).unwrap().npcs;
+                let msg = format!(
+                    "OK {{ \"room\": {}, \"players\": {:?}, \"items\": {:?}, , \"npcs\": {:?} }}\n",
+                    room_str, players, items, npcs
+                );
+                let mut guard_stream = player.stream.lock().unwrap();
+                guard_stream.write_all(msg.as_bytes()).expect("Failder to write reponse");
             }
             println!("USER USE LOOK");
         }
         Some("MOVE") => {
+            let mut chat_args = args.next().expect("REASON").splitn(2, ' ');
             stream.write_all(b"OK\n").expect("Failder to write reponse");
             println!("USER USE MOVE");
         }
@@ -118,7 +117,7 @@ pub fn parse_command(
                 for (_client_name, client_steam) in guard.iter_mut()
                 {
                     let msg = format!("EVT GLOBAL CHAT {} {}\n", name, chat_msg);
-                    client_steam.stream.write_all(msg.as_bytes()).expect("write failed");
+                    client_steam.stream.lock().unwrap().write_all(msg.as_bytes()).expect("write failed");
                 }
             }
             println!("{} USE CHAT", name);
