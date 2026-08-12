@@ -29,7 +29,7 @@ pub struct TapClient {
 }
 
 impl TapClient {
-    fn new(address: String, rx: Receiver<String>, tx_out: Sender<String>) -> TapClient {
+    pub fn new(address: String, rx: Receiver<String>, tx_out: Sender<String>) -> TapClient {
         TapClient {
             server_address: address,
             connected: false,
@@ -110,6 +110,34 @@ impl TapClient {
         }
         self.pending_cmds.push_back(cmd);
         self.logs.push(log_line);
+    }
+
+    fn connect_panel(&mut self, ui: &mut egui::Ui) {
+        let mut pending: Option<String> = None;
+
+        egui::CentralPanel::default().show(ui, |ui| {
+            ui.add_space(40.0);
+            ui.heading(egui::RichText::new("TAP").size(28.0));
+            ui.add_space(16.0);
+            ui.label("Username:");
+            ui.text_edit_singleline(&mut self.username);
+            ui.add_space(8.0);
+
+            let name_ok = !self.username.trim().is_empty() && !self.username.contains(' ');
+            if ui
+                .add_enabled(name_ok, egui::Button::new("Connect"))
+                .clicked()
+            {
+                pending = Some(format!("CONNECT {}", self.username));
+            }
+            if self.username.contains(' ') {
+                ui.label("(no spaces allowed in username)");
+            }
+        });
+
+        if let Some(cmd) = pending {
+            self.send_command(cmd);
+        }
     }
 
     fn top_panel(&mut self, ui: &mut egui::Ui) {
@@ -234,13 +262,7 @@ impl TapClient {
                         });
                     }
                 } else {
-                    ui.label(egui::RichText::new("Not connected.").size(20.0));
-                    ui.add_space(8.0);
-                    ui.label("Username:");
-                    ui.text_edit_singleline(&mut self.username);
-                    if ui.button("Connect").clicked() {
-                        pending = Some(format!("CONNECT {}", self.username));
-                    }
+                    ui.label(egui::RichText::new("Connecting...").size(20.0));
                 }
 
                 ui.separator();
@@ -340,55 +362,119 @@ impl TapClient {
 
             ServerMsg::Ok(data) => match self.pending_cmds.pop_front() {
                 Some(cmd) => {
-                    let mut splitter = cmd.splitn(3, ' ');
+                    let mut cmd_splitter = cmd.splitn(3, ' ');
+                    let first_word = cmd_splitter.next().unwrap_or("");
 
-                    match (splitter.next(), splitter.next(), splitter.next()) {
-                        (Some("CONNECT"), Some("connected"), None) => {
-                            self.connected = true;
-                            self.send_command("LOOK".to_string());
-                            self.send_command("INVENTORY".to_string());
-                            self.send_command("STATUS".to_string());
-                        }
-
-                        (Some("MOVE"), _, None) => {
-                            self.send_command("LOOK".to_string());
-                        }
-
-                        (Some("TAKE"), Some(value), None) => {
-                            let mut v_splitter = value.splitn(2, '=');
-
-                            match (v_splitter.next(), v_splitter.next()) {
-                                (Some("taken"), Some(item)) => {
-                                    self.items.retain(|x| x != item);
-                                    self.inventory.push(item.to_string());
-                                }
-                                _ => self.logs.push(format!("OK to '{cmd}': {data}")),
+                    match first_word {
+                        "CONNECT" => {
+                            if data == "connected" {
+                                self.connected = true;
+                                self.send_command("LOOK".to_string());
+                                self.send_command("INVENTORY".to_string());
+                                self.send_command("STATUS".to_string());
+                            } else {
+                                self.logs
+                                    .push(format!("Unexpected reply to CONNECT: {data}"));
                             }
                         }
 
-                        (Some("DROP"), Some(value), None) => {
-                            let mut v_splitter = value.splitn(2, '=');
+                        "MOVE" => {
+                            let mut data_splitter = data.splitn(3, '=');
 
-                            match (v_splitter.next(), v_splitter.next()) {
-                                (Some("dropped"), Some(item)) => {
-                                    self.inventory.retain(|x| x != item);
-                                    self.items.push(item.to_string());
+                            match (
+                                data_splitter.next(),
+                                data_splitter.next(),
+                                data_splitter.next(),
+                            ) {
+                                (Some("room"), Some(_room_name), None) => {
+                                    self.send_command("LOOK".to_string())
                                 }
-                                _ => self.logs.push(format!("OK to '{cmd}': {data}")),
+                                _ => self.logs.push(format!("Unexpected reply to MOVE: {data}")),
                             }
                         }
 
-                        (Some("GROUP"), Some(grp_action), rest) => match grp_action {
-                            "JOIN" | "CREATE" => todo!(),
-                        },
+                        "TAKE" => {
+                            let mut data_splitter = data.splitn(3, '=');
 
-                        (Some("CHAT"), _, _) => {}
+                            match (
+                                data_splitter.next(),
+                                data_splitter.next(),
+                                data_splitter.next(),
+                            ) {
+                                (Some("taken"), Some(item_name), None) => {
+                                    self.items.retain(|x| x != item_name);
+                                    self.inventory.push(item_name.to_string());
+                                }
+                                _ => self.logs.push(format!("Unexpected reply to TAKE: {data}")),
+                            }
+                        }
 
-                        (Some("QUIT"), _, _) => {}
+                        "DROP" => {
+                            let mut data_splitter = data.splitn(3, '=');
+
+                            match (
+                                data_splitter.next(),
+                                data_splitter.next(),
+                                data_splitter.next(),
+                            ) {
+                                (Some("dropped"), Some(item_name), None) => {
+                                    self.inventory.retain(|x| x != item_name);
+                                    self.items.push(item_name.to_string());
+                                }
+                                _ => self.logs.push(format!("Unexpected reply to DROP: {data}")),
+                            }
+                        }
+
+                        "GROUP" => {
+                            let second_word = cmd_splitter.next().unwrap_or("");
+
+                            match second_word {
+                                "JOIN" | "CREATE" => {
+                                    let mut data_splitter = data.splitn(3, '=');
+
+                                    match (
+                                        data_splitter.next(),
+                                        data_splitter.next(),
+                                        data_splitter.next(),
+                                    ) {
+                                        (Some("group"), Some(group_name), None) => {
+                                            self.group = Some(group_name.to_string())
+                                        }
+                                        _ => self
+                                            .logs
+                                            .push(format!("Unexpected reply to GROUP: {data}")),
+                                    }
+                                }
+                                "LEAVE" => {
+                                    if !(data.is_empty()) {
+                                        self.logs
+                                            .push(format!("Unexpected reply to GROUP LEAVE: {data}"));
+                                    } else {
+                                        self.group = None
+                                    }
+                                }
+                                _ => self.logs.push(format!("Unexpected reply to GROUP: {data}")),
+                            }
+                        }
+
+                        "CHAT" => {
+                            if !(data.is_empty()) {
+                                self.logs.push(format!("Unexpected reply to CHAT: {data}"))
+                            }
+                        }
+
+                        "QUIT" => {
+                            if data != "bye" {
+                                self.logs.push(format!("Unexpected reply to QUIT: {data}"))
+                            } else {
+                                self.logs.push("Quitting".to_string())
+                            }
+                        }
 
                         _ => self.logs.push(format!("OK to '{cmd}': {data}")),
                     }
                 }
+
                 None => self.logs.push(format!("Unsolicited OK: {data}")),
             },
 
@@ -412,10 +498,16 @@ impl eframe::App for TapClient {
             self.logs.push(format!("{msg:?}"));
             self.apply(msg);
         }
-        self.top_panel(ui);
-        self.left_panel(ui);
-        self.right_panel(ui);
-        self.bottom_panel(ui);
-        self.central_panel(ui);
+
+        if self.connected {
+            self.top_panel(ui);
+            self.left_panel(ui);
+            self.right_panel(ui);
+            self.bottom_panel(ui);
+            self.central_panel(ui);
+        } else {
+            self.right_panel(ui);
+            self.connect_panel(ui);
+        }
     }
 }

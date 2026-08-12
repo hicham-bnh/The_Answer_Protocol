@@ -21,7 +21,8 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             net::start("127.0.0.1:8080".to_string(), tx, rx_out, cc.egui_ctx.clone());
-            Ok(Box::new(TapClient::fake(rx, tx_out)))
+            // Ok(Box::new(TapClient::fake(rx, tx_out)))
+            Ok(Box::new(TapClient::new("127.0.0.1:8080".to_string(), rx, tx_out)))
         })
     )
 }
