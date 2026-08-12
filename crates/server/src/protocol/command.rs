@@ -29,7 +29,9 @@ pub fn connect_user(
                         stream: Mutex::new(stream_for_map),
                         room: spawn_room.to_string(),
                         name: name.to_string(),
-                        inventory: vec![]
+                        inventory: vec![],
+                        hp: 0,
+                        combat: 0
                     };
                     guard.insert(name.clone(), player);
                     stream.write_all(b"OK connected\n").expect("write failed");
@@ -239,8 +241,12 @@ pub fn parse_command(
             println!("USER USE LOOK");
         }
         Some("STATUS") => {
-            stream.write_all(b"OK\n").expect("Failder to write reponse");
-            println!("USER USE LOOK");
+            let mut guard = players.lock().unwrap();
+            if let Some(player) = guard.get_mut(name) {
+                let msg = format!("OK status {{hp={}, combat={}}}\n", player.hp, player.combat);
+                stream.write_all(msg.as_bytes()).expect("ERROR PRINT TATUS");
+            }
+            println!("USER USE STATUS");
         }
         Some("QUEST") => {
             stream.write_all(b"OK\n").expect("Failder to write reponse");

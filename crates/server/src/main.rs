@@ -16,7 +16,9 @@ pub struct Player {
     pub stream: Mutex<TcpStream>,
     pub room: String,
     pub name: String,
-    pub inventory: Vec<String>
+    pub inventory: Vec<String>,
+    pub hp: u64,
+    pub combat: u64
 }
 use protocol::command::parse_command;
 use protocol::command::connect_user;
