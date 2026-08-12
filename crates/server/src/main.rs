@@ -15,7 +15,8 @@ mod world_struct {
 pub struct Player {
     pub stream: Mutex<TcpStream>,
     pub room: String,
-    pub name: String
+    pub name: String,
+    pub inventory: Vec<String>
 }
 use protocol::command::parse_command;
 use protocol::command::connect_user;
@@ -28,7 +29,7 @@ fn parse_world() -> GameWorld {
     game_world
 }
 
-fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, Player>>>, spawn_room: String, world: GameWorld){
+fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, Player>>>, spawn_room: String, world: Arc<Mutex<GameWorld>>){
     let mut is_connect = false;
     let mut name = String::new();
     let stream_clone = stream.try_clone().expect("clone");
@@ -47,17 +48,17 @@ fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, Player>>>, sp
 
 fn main(){
     let listener = TcpListener::bind("127.0.0.1:8080").expect("failde to bind");
-    let game_world = parse_world();
-    let spawn_room = game_world.world.start_location.clone();
+    let game_world = Arc::new(Mutex::new(parse_world()));
+    let spawn_room = game_world.lock().unwrap().world.start_location.clone();
     println!("Server run");
     let players: Arc<Mutex<HashMap<String, Player>>> = Arc::new(Mutex::new(HashMap::new()));
     for stream in listener.incoming(){
         match stream{
             Ok(stream) => {
                 let players_clone = Arc::clone(&players);
+                let world_clone =  Arc::clone(&game_world);
                 let value = spawn_room.clone();
-                let game_world = parse_world();
-                std::thread::spawn(move || lunch(stream, players_clone, value.clone(), game_world));
+                std::thread::spawn(move || lunch(stream, players_clone, value.clone(), world_clone));
             }
             Err(e) => {
                 eprintln!("Failde to conection: {}", e);
