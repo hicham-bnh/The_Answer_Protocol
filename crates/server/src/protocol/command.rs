@@ -153,7 +153,13 @@ pub fn parse_command(
             println!("{} USE CHAT", name);
         }
         Some("WHO") => {
-            stream.write_all(b"OK\n").expect("Failder to write reponse");
+            let mut nmbr_players: u32 = 0;
+            let mut guard = players.lock().unwrap();
+            for (_client_name, client_steam) in guard.iter_mut(){
+                nmbr_players += 1;
+            }
+            let msg = format!("OK {{{}}}\n", nmbr_players);
+            stream.write_all(msg.as_bytes()).expect("Failder to write reponse");
             println!("USER USE LOOK");
         }
         Some("GROUP") => {
