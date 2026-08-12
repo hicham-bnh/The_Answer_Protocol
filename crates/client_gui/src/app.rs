@@ -6,6 +6,7 @@ use std::sync::mpsc::{Receiver, Sender};
 
 pub struct TapClient {
     server_address: String,
+    connected: bool,
     username: String,
     room: Option<Room>,
     players: Vec<String>,
@@ -31,6 +32,7 @@ impl TapClient {
     fn new(address: String, rx: Receiver<String>, tx_out: Sender<String>) -> TapClient {
         TapClient {
             server_address: address,
+            connected: false,
             username: String::new(),
             room: None,
             players: Vec::new(),
@@ -57,6 +59,7 @@ impl TapClient {
         use std::collections::HashMap;
 
         TapClient {
+            connected: true,
             room: Some(Room {
                 id: "loc.square".to_string(),
                 name: "Village Square".to_string(),
@@ -334,10 +337,69 @@ impl TapClient {
                 }
                 EvtType::PlayerCount(data) => self.server_players = data,
             },
-            ServerMsg::Ok(data) => self.logs.push(format!("OK (unhandled): {data}")),
-            ServerMsg::Err(code, description) => {
-                self.logs.push(format!("{}: {}", code, description))
-            }
+
+            ServerMsg::Ok(data) => match self.pending_cmds.pop_front() {
+                Some(cmd) => {
+                    let mut splitter = cmd.splitn(3, ' ');
+
+                    match (splitter.next(), splitter.next(), splitter.next()) {
+                        (Some("CONNECT"), Some("connected"), None) => {
+                            self.connected = true;
+                            self.send_command("LOOK".to_string());
+                            self.send_command("INVENTORY".to_string());
+                            self.send_command("STATUS".to_string());
+                        }
+
+                        (Some("MOVE"), _, None) => {
+                            self.send_command("LOOK".to_string());
+                        }
+
+                        (Some("TAKE"), Some(value), None) => {
+                            let mut v_splitter = value.splitn(2, '=');
+
+                            match (v_splitter.next(), v_splitter.next()) {
+                                (Some("taken"), Some(item)) => {
+                                    self.items.retain(|x| x != item);
+                                    self.inventory.push(item.to_string());
+                                }
+                                _ => self.logs.push(format!("OK to '{cmd}': {data}")),
+                            }
+                        }
+
+                        (Some("DROP"), Some(value), None) => {
+                            let mut v_splitter = value.splitn(2, '=');
+
+                            match (v_splitter.next(), v_splitter.next()) {
+                                (Some("dropped"), Some(item)) => {
+                                    self.inventory.retain(|x| x != item);
+                                    self.items.push(item.to_string());
+                                }
+                                _ => self.logs.push(format!("OK to '{cmd}': {data}")),
+                            }
+                        }
+
+                        (Some("GROUP"), Some(grp_action), rest) => match grp_action {
+                            "JOIN" | "CREATE" => todo!(),
+                        },
+
+                        (Some("CHAT"), _, _) => {}
+
+                        (Some("QUIT"), _, _) => {}
+
+                        _ => self.logs.push(format!("OK to '{cmd}': {data}")),
+                    }
+                }
+                None => self.logs.push(format!("Unsolicited OK: {data}")),
+            },
+
+            ServerMsg::Err(code, description) => match self.pending_cmds.pop_front() {
+                Some(cmd) => self
+                    .logs
+                    .push(format!("ERR to '{cmd}': {code} {description}")),
+                None => self
+                    .logs
+                    .push(format!("Unsolicited ERR: {code} {description}")),
+            },
             ServerMsg::Unknown(data) => self.logs.push(data.to_string()),
         }
     }
