@@ -182,7 +182,6 @@ pub fn parse_command(
                             let room_player = player.room.clone();
                             let mut w = world.lock().unwrap();
                             let is_obtainable = w.items.get(items_to_take).map(|i| i.obtainable).unwrap_or(false);
-            
                             if is_obtainable {
                                 if let Some(location) = w.world.locations.get_mut(&room_player) {
                                     if let Some(index) = location.items.iter().position(|x| x == items_to_take) {
@@ -197,7 +196,26 @@ pub fn parse_command(
             println!("USER USE TAKE");
         }
         Some("DROP") => {
-            stream.write_all(b"OK\n").expect("Failder to write reponse");
+            let Some(rest) = args.next() else {
+                    stream.write_all(b"ERR usage: TAKE <item>\n").ok();
+                    println!("USER USE TAKE (missing arg)");
+                    return;
+                };
+            let mut chat_args = rest.splitn(2, ' ');
+            let items_to_drop = chat_args.next().unwrap_or("");
+            let mut guard = players.lock().unwrap();
+                        if let Some(player) = guard.get_mut(name) {
+                            let room_player = player.room.clone();
+                            let mut w = world.lock().unwrap();
+                            if let Some(index) = player.inventory.iter().position(|x| x == items_to_drop) {
+                                if let Some(location) = w.world.locations.get_mut(&room_player) {
+                                    player.inventory.remove(index);
+                                    location.items.push(items_to_drop.to_string());
+                                    let msg = format!("OK dropped={}\n", items_to_drop);
+                                    stream.write_all(msg.as_bytes()).expect("Failed to write response");
+                                }
+                            }
+            }
             println!("USER USE LOOK");
         }
         Some("INVENTORY") => {
