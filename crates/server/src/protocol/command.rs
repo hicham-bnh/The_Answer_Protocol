@@ -28,7 +28,8 @@ pub fn connect_user(
                     let player = Player {
                         stream: Mutex::new(stream_for_map),
                         room: spawn_room.to_string(),
-                        name: name.to_string()
+                        name: name.to_string(),
+                        inventory: vec![]
                     };
                     guard.insert(name.clone(), player);
                     stream.write_all(b"OK connected\n").expect("write failed");
@@ -65,7 +66,7 @@ pub fn parse_command(
     stream: &mut TcpStream,
     players: &Arc<Mutex<HashMap<String, Player>>>,
     name: &str,
-    world: &GameWorld
+    world: &Arc<Mutex<GameWorld>>
     ) {
     let mut args = line.splitn(2, ' ');
     match args.next(){
@@ -85,8 +86,9 @@ pub fn parse_command(
                  }
              }
              if let Some(player) = guard.get(name) {
-                let items = &world.world.locations.get(&room_str).unwrap().items;
-                let npcs = &world.world.locations.get(&room_str).unwrap().npcs;
+                let w = world.lock().unwrap();
+                let items = &w.world.locations.get(&room_str).unwrap().items;
+                let npcs = &w.world.locations.get(&room_str).unwrap().npcs;
                 let msg = format!(
                     "OK {{ \"room\": {}, \"players\": {:?}, \"items\": {:?}, , \"npcs\": {:?} }}\n",
                     room_str, players, items, npcs
@@ -107,7 +109,8 @@ pub fn parse_command(
             let mut guard = players.lock().unwrap();
             if let Some(player) = guard.get_mut(name) {
                 let room_str = player.room.clone();
-                let exists = &world.world.locations.get(&room_str).unwrap().exits;
+                let w = world.lock().unwrap();
+                let exists = &w.world.locations.get(&room_str).unwrap().exits;
                 if let Some(room_to) = exists.get(move_to) {
                     let room_to = room_to.clone();
                     let msg = format!("OK room={}\n", room_to);
@@ -155,7 +158,7 @@ pub fn parse_command(
         Some("WHO") => {
             let mut nmbr_players: u32 = 0;
             let mut guard = players.lock().unwrap();
-            for (_client_name, client_steam) in guard.iter_mut(){
+            for _client_name in guard.iter_mut(){
                 nmbr_players += 1;
             }
             let msg = format!("OK {{{}}}\n", nmbr_players);
@@ -167,15 +170,46 @@ pub fn parse_command(
             println!("USER USE LOOK");
         }
         Some("TAKE") => {
-            stream.write_all(b"OK\n").expect("Failder to write reponse");
-            println!("USER USE LOOK");
+            let Some(rest) = args.next() else {
+                    stream.write_all(b"ERR usage: TAKE <item>\n").ok();
+                    println!("USER USE TAKE (missing arg)");
+                    return;
+                };
+            let mut chat_args = rest.splitn(2, ' ');
+            let items_to_take = chat_args.next().unwrap_or("");
+            let mut guard = players.lock().unwrap();
+                        if let Some(player) = guard.get_mut(name) {
+                            let room_player = player.room.clone();
+                            let mut w = world.lock().unwrap();
+                            let is_obtainable = w.items.get(items_to_take).map(|i| i.obtainable).unwrap_or(false);
+            
+                            if is_obtainable {
+                                if let Some(location) = w.world.locations.get_mut(&room_player) {
+                                    if let Some(index) = location.items.iter().position(|x| x == items_to_take) {
+                                        location.items.remove(index);
+                                        player.inventory.push(items_to_take.to_string());
+                                        let msg = format!("OK taken={}\n", items_to_take);
+                                        stream.write_all(msg.as_bytes()).expect("Failed to write response");
+                                    }
+                                }
+                            }
+                        }
+            println!("USER USE TAKE");
         }
         Some("DROP") => {
             stream.write_all(b"OK\n").expect("Failder to write reponse");
             println!("USER USE LOOK");
         }
         Some("INVENTORY") => {
-            stream.write_all(b"OK\n").expect("Failder to write reponse");
+            let guard = players.lock().unwrap();
+            if let Some(player) = guard.get(name) {
+                let msg = format!("OK {:?}\n", player.inventory);
+                stream.write_all(msg.as_bytes()).expect("ERROR");
+            }
+            else {
+                let msg_error = format!("ERROR NO PLAYER\n");
+                stream.write_all(msg_error.as_bytes()).expect("ERROR");
+            }
             println!("USER USE LOOK");
         }
         Some("TALK") => {
