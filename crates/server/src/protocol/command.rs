@@ -260,237 +260,287 @@ pub fn parse_command(
             println!("USER USE LOOK");
         }
         Some("COMBAT") => {
-            let room = {
-                let mut guard = players.lock().unwrap();
-                guard.get_mut(name).map(|p| p.room.clone())
-            };
-            if let Some(room) = room {
-                let npc_name = {
-                    let w = world.lock().unwrap();
-                    w.world.locations.get(&room)
-                        .and_then(|loc| loc.npcs.first())
-                        .cloned()
-                };
-                if let Some(npc_id) = npc_name {
-                    let npc_display_name = {
-                        let w = world.lock().unwrap();
-                        w.npcs.get(&npc_id).map(|n| n.name.clone())
+                    let room = {
+                        let mut guard = players.lock().unwrap();
+                        guard.get_mut(name).map(|p| p.room.clone())
                     };
-                    if let Some(display_name) = npc_display_name {
-                        let can_engage = {
-                            let mut w = world.lock().unwrap();
-                            if let Some(n) = w.npcs.get_mut(&npc_id) {
-                                if n.engaged_by.is_some() {
-                                    false
-                                } else {
-                                    n.engaged_by = Some(name.to_string());
-                                    true
-                                }
-                            } else {
-                                false
-                            }
+                    if let Some(room) = room {
+                        let npc_name = {
+                            let w = world.lock().unwrap();
+                            w.world.locations.get(&room)
+                                .and_then(|loc| loc.npcs.first())
+                                .cloned()
                         };
-                        if !can_engage {
-                            stream.write_all(b"ERR NPC already in combat\n").expect("ERROR");
-                            return;
-                        }
-                        let msg = format!("combat with {}\n", display_name);
-                        stream.write_all(msg.as_bytes()).expect("ERROR");
-                        let _in_combat = {
-                            let mut guard = players.lock().unwrap();
-                            guard.get_mut(name).map(|p| p.combat = "in combat".to_string())
-                        };
-                        let stream_clone = stream.try_clone().expect("clone failed");
-                        let read_buf = BufReader::new(stream_clone);
-                        for line in read_buf.lines() {
-                            let line = line.expect("erreur lecture ligne");
-                            let mut args = line.splitn(2, ' ');
-                            match args.next() {
-                                Some("ATTACK") => {
-                                    let pv = {
-                                        let mut guard = players.lock().unwrap();
-                                        guard.get_mut(name).map(|p| p.pv.clone())
-                                    };
-                                    let hp = {
-                                        let mut guard = players.lock().unwrap();
-                                        guard.get_mut(name).map(|p| p.hp.clone())
-                                    };
-                                    let npc_info = {
-                                        let w = world.lock().unwrap();
-                                        w.npcs.get(&npc_id).map(|n| (n.stats.hp, n.stats.damage, n.hostile))
-                                    };
-                                    let (_npc_hp, _npc_damage, npc_hostile) = npc_info.unwrap();
-                                    if _npc_hp < 1 {
-                                        let msg = format!("NO NPC here\n");
-                                        stream.write_all(msg.as_bytes()).expect("ERROR");
-                                        let mut w = world.lock().unwrap();
-                                        if let Some(n) = w.npcs.get_mut(&npc_id) {
-                                            n.engaged_by = None;
-                                        }
-                                        return;
-                                    }
-                                    let npc_info = {
-                                        let mut w = world.lock().unwrap();
-                                        if let Some(n) = w.npcs.get_mut(&npc_id) {
-                                            n.stats.hp = n.stats.hp.saturating_sub(pv.unwrap_or(0));
-                                            Some((n.stats.hp, n.stats.damage, n.hostile))
+                        if let Some(npc_id) = npc_name {
+                            let npc_display_name = {
+                                let w = world.lock().unwrap();
+                                w.npcs.get(&npc_id).map(|n| n.name.clone())
+                            };
+                            if let Some(display_name) = npc_display_name {
+                                let can_engage = {
+                                    let mut w = world.lock().unwrap();
+                                    if let Some(n) = w.npcs.get_mut(&npc_id) {
+                                        if n.engaged_by.is_some() {
+                                            false
                                         } else {
-                                            None
+                                            n.engaged_by = Some(name.to_string());
+                                            true
                                         }
-                                    };
-                                    let (npc_hp, npc_damage, _npc_hostile) = npc_info.unwrap();
-                                    if npc_hp < 1 {
-                                        let _won = {
-                                            let mut guard = players.lock().unwrap();
-                                            guard.get_mut(name).map(|p| p.combat = "won".to_string())
-                                        };
-                                        let combat_status = {
-                                            let mut guard = players.lock().unwrap();
-                                            guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
-                                        };
-                                        let msg = format!(
-                                            "OK {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: {}, status: {}}}\n",
-                                            hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), npc_damage.unwrap_or(0), combat_status
-                                        );
-                                        stream.write_all(msg.as_bytes()).expect("ERROR");
-                                        let msg_won = format!("OK you won the fight\n");
-                                        stream.write_all(msg_won.as_bytes()).expect("ERROR");
-                                        {
-                                            let mut w = world.lock().unwrap();
-                                            if let Some(location) = w.world.locations.get_mut(&room) {
-                                                location.npcs.retain(|id| id != &npc_id);
+                                    } else {
+                                        false
+                                    }
+                                };
+                                if !can_engage {
+                                    stream.write_all(b"ERR NPC already in combat\n").expect("ERROR");
+                                    return;
+                                }
+                                let msg = format!("combat with {}\n", display_name);
+                                stream.write_all(msg.as_bytes()).expect("ERROR");
+                                let _in_combat = {
+                                    let mut guard = players.lock().unwrap();
+                                    guard.get_mut(name).map(|p| p.combat = "in combat".to_string())
+                                };
+                                let stream_clone = stream.try_clone().expect("clone failed");
+                                let read_buf = BufReader::new(stream_clone);
+                                for line in read_buf.lines() {
+                                    let line = line.expect("erreur lecture ligne");
+                                    let mut args = line.splitn(2, ' ');
+                                    match args.next() {
+                                        Some("ATTACK") => {
+                                            let pv = {
+                                                let mut guard = players.lock().unwrap();
+                                                guard.get_mut(name).map(|p| p.pv.clone())
+                                            };
+                                            let hp = {
+                                                let mut guard = players.lock().unwrap();
+                                                guard.get_mut(name).map(|p| p.hp.clone())
+                                            };
+                                            let npc_info = {
+                                                let w = world.lock().unwrap();
+                                                w.npcs.get(&npc_id).map(|n| (n.stats.hp, n.stats.damage, n.hostile))
+                                            };
+                                            let (_npc_hp, _npc_damage, npc_hostile) = npc_info.unwrap();
+                                            if _npc_hp < 1 {
+                                                let msg = format!("NO NPC here\n");
+                                                stream.write_all(msg.as_bytes()).expect("ERROR");
+                                                let mut w = world.lock().unwrap();
+                                                if let Some(n) = w.npcs.get_mut(&npc_id) {
+                                                    n.engaged_by = None;
+                                                }
+                                                return;
                                             }
-                                            if let Some(n) = w.npcs.get_mut(&npc_id) {
-                                                n.engaged_by = None;
+                                            let npc_info = {
+                                                let mut w = world.lock().unwrap();
+                                                if let Some(n) = w.npcs.get_mut(&npc_id) {
+                                                    n.stats.hp = n.stats.hp.saturating_sub(pv.unwrap_or(0));
+                                                    Some((n.stats.hp, n.stats.damage, n.hostile))
+                                                } else {
+                                                    None
+                                                }
+                                            };
+                                            let (npc_hp, npc_damage, _npc_hostile) = npc_info.unwrap();
+                                            if npc_hp < 1 {
+                                                let _won = {
+                                                    let mut guard = players.lock().unwrap();
+                                                    guard.get_mut(name).map(|p| p.combat = "won".to_string())
+                                                };
+                                                let combat_status = {
+                                                    let mut guard = players.lock().unwrap();
+                                                    guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
+                                                };
+                                                let msg = format!(
+                                                    "OK {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: {}, status: {}}}\n",
+                                                    hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), npc_damage.unwrap_or(0), combat_status
+                                                );
+                                                stream.write_all(msg.as_bytes()).expect("ERROR");
+                                                let msg_won = format!("OK you won the fight\n");
+                                                stream.write_all(msg_won.as_bytes()).expect("ERROR");
+                                                {
+                                                    let mut w = world.lock().unwrap();
+                                                    if let Some(location) = w.world.locations.get_mut(&room) {
+                                                        location.npcs.retain(|id| id != &npc_id);
+                                                    }
+                                                    if let Some(n) = w.npcs.get_mut(&npc_id) {
+                                                        n.engaged_by = None;
+                                                    }
+                                                }
+                                                let world_clone = Arc::clone(world);
+                                                let npc_id_clone = npc_id.clone();
+                                                let room_clone = room.clone();
+                                                thread::spawn(move || {
+                                                    thread::sleep(Duration::from_secs(30));
+                                                    let mut w = world_clone.lock().unwrap();
+                                                    if let Some(n) = w.npcs.get_mut(&npc_id_clone) {
+                                                        n.stats.hp = n.stats.max_hp;
+                                                        n.engaged_by = None;
+                                                    }
+                                                    if let Some(location) = w.world.locations.get_mut(&room_clone) {
+                                                        if !location.npcs.contains(&npc_id_clone) {
+                                                            location.npcs.push(npc_id_clone.clone());
+                                                        }
+                                                    }
+                                                });
+        
+                                                break;
+                                            } else if npc_hostile {
+                                                let combat_status = {
+                                                    let mut guard = players.lock().unwrap();
+                                                    guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
+                                                };
+                                                let msg = format!(
+                                                    "OK {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: {}, status: {}}}\n",
+                                                    hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), npc_damage.unwrap_or(0), combat_status
+                                                );
+                                                stream.write_all(msg.as_bytes()).expect("ERROR");
+                                                let hp = {
+                                                    let mut guard = players.lock().unwrap();
+                                                    if let Some(p) = guard.get_mut(name) {
+                                                        p.hp = p.hp.saturating_sub(npc_damage.unwrap_or(0));
+                                                        Some(p.hp)
+                                                    } else {
+                                                        None
+                                                    }
+                                                };
+                                                let msg_repost = format!(
+                                                    "repost {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: {}, status: {}}}\n",
+                                                    hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), npc_damage.unwrap_or(0), combat_status
+                                                );
+                                                stream.write_all(msg_repost.as_bytes()).expect("ERROR");
+        
+                                                // --- Mort du joueur ---
+                                                if hp.unwrap_or(0) < 1 {
+                                                    let respawn_room = {
+                                                        let w = world.lock().unwrap();
+                                                        w.world.respawn_location.clone()
+                                                    };
+                                                    {
+                                                        let mut w = world.lock().unwrap();
+                                                        if let Some(n) = w.npcs.get_mut(&npc_id) {
+                                                            n.engaged_by = None;
+                                                        }
+                                                    }
+                                                    {
+                                                        let mut guard = players.lock().unwrap();
+                                                        if let Some(p) = guard.get_mut(name) {
+                                                            p.hp = 50;
+                                                            p.combat = "not in combat".to_string();
+                                                            p.room = respawn_room.clone();
+                                                        }
+                                                    }
+                                                    let msg_death = format!("OK you died, respawned in {} with 50 hp\n", respawn_room);
+                                                    stream.write_all(msg_death.as_bytes()).expect("ERROR");
+                                                    break;
+                                                }
+                                            } else {
+                                                let combat_status = {
+                                                    let mut guard = players.lock().unwrap();
+                                                    guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
+                                                };
+                                                let msg = format!(
+                                                    "OK {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: 0, status: {}}}\n",
+                                                    hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), combat_status
+                                                );
+                                                stream.write_all(msg.as_bytes()).expect("ERROR");
                                             }
                                         }
-                                        let world_clone = Arc::clone(world);
-                                        let npc_id_clone = npc_id.clone();
-                                        let room_clone = room.clone();
-                                        thread::spawn(move || {
-                                            thread::sleep(Duration::from_secs(30));
-                                            let mut w = world_clone.lock().unwrap();
-                                            if let Some(n) = w.npcs.get_mut(&npc_id_clone) {
-                                                n.stats.hp = n.stats.max_hp;
-                                                n.engaged_by = None;
+                                        Some("DEFEND") => {
+                                            let msg = format!("YOU CHOICE DEFEND\n");
+                                            stream.write_all(msg.as_bytes()).expect("ERROR");
+                                            let pv = {
+                                                let mut guard = players.lock().unwrap();
+                                                guard.get_mut(name).map(|p| p.pv.clone())
+                                            };
+                                            let npc_info = {
+                                                let w = world.lock().unwrap();
+                                                w.npcs.get(&npc_id).map(|n| (n.stats.hp, n.stats.damage, n.hostile))
+                                            };
+                                            let (npc_hp, npc_damage, _npc_hostile) = npc_info.unwrap();
+                                            let hp = {
+                                                let mut guard = players.lock().unwrap();
+                                                if let Some(p) = guard.get_mut(name) {
+                                                    p.hp = p.hp.saturating_sub(npc_damage.unwrap_or(0) / 2);
+                                                    Some(p.hp)
+                                                } else {
+                                                    None
+                                                }
+                                            };
+                                            let combat_status = {
+                                                let mut guard = players.lock().unwrap();
+                                                guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
+                                            };
+                                            let msg_repost = format!(
+                                                "repost {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: {}, status: {}}}\n",
+                                                hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), npc_damage.unwrap_or(0) / 2, combat_status
+                                            );
+                                            stream.write_all(msg_repost.as_bytes()).expect("ERROR");
+        
+                                            // --- Mort du joueur ---
+                                            if hp.unwrap_or(0) < 1 {
+                                                let respawn_room = {
+                                                    let w = world.lock().unwrap();
+                                                    w.world.respawn_location.clone()
+                                                };
+                                                {
+                                                    let mut w = world.lock().unwrap();
+                                                    if let Some(n) = w.npcs.get_mut(&npc_id) {
+                                                        n.engaged_by = None;
+                                                    }
+                                                }
+                                                {
+                                                    let mut guard = players.lock().unwrap();
+                                                    if let Some(p) = guard.get_mut(name) {
+                                                        p.hp = 50;
+                                                        p.combat = "not in combat".to_string();
+                                                        p.room = respawn_room.clone();
+                                                    }
+                                                }
+                                                let msg_death = format!("OK you died, respawned in {} with 50 hp\n", respawn_room);
+                                                stream.write_all(msg_death.as_bytes()).expect("ERROR");
+                                                break;
                                             }
-                                            if let Some(location) = w.world.locations.get_mut(&room_clone) {
-                                                if !location.npcs.contains(&npc_id_clone) {
-                                                    location.npcs.push(npc_id_clone.clone());
+                                        }
+                                        Some("FLEE") => {
+                                            {
+                                                let mut w = world.lock().unwrap();
+                                                if let Some(n) = w.npcs.get_mut(&npc_id) {
+                                                    n.engaged_by = None;
                                                 }
                                             }
-                                        });
-        
-                                        break;
-                                    } else if npc_hostile {
-                                        let combat_status = {
-                                            let mut guard = players.lock().unwrap();
-                                            guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
-                                        };
-                                        let msg = format!(
-                                            "OK {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: {}, status: {}}}\n",
-                                            hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), npc_damage.unwrap_or(0), combat_status
-                                        );
-                                        stream.write_all(msg.as_bytes()).expect("ERROR");
-                                        let hp = {
-                                            let mut guard = players.lock().unwrap();
-                                            if let Some(p) = guard.get_mut(name) {
-                                                p.hp = p.hp.saturating_sub(npc_damage.unwrap_or(0));
-                                                Some(p.hp)
-                                            } else {
-                                                None
-                                            }
-                                        };
-                                        let msg_repost = format!(
-                                            "repost {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: {}, status: {}}}\n",
-                                            hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), npc_damage.unwrap_or(0), combat_status
-                                        );
-                                        stream.write_all(msg_repost.as_bytes()).expect("ERROR");
-                                    } else {
-                                        let combat_status = {
-                                            let mut guard = players.lock().unwrap();
-                                            guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
-                                        };
-                                        let msg = format!(
-                                            "OK {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: 0, status: {}}}\n",
-                                            hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), combat_status
-                                        );
-                                        stream.write_all(msg.as_bytes()).expect("ERROR");
-                                    }
-                                }
-                                Some("DEFEND") => {
-                                    let msg = format!("YOU CHOICE DEFEND\n");
-                                    stream.write_all(msg.as_bytes()).expect("ERROR");
-                                    let pv = {
-                                        let mut guard = players.lock().unwrap();
-                                        guard.get_mut(name).map(|p| p.pv.clone())
-                                    };
-                                    let npc_info = {
-                                        let w = world.lock().unwrap();
-                                        w.npcs.get(&npc_id).map(|n| (n.stats.hp, n.stats.damage, n.hostile))
-                                    };
-                                    let (npc_hp, npc_damage, _npc_hostile) = npc_info.unwrap();
-                                    let hp = {
-                                        let mut guard = players.lock().unwrap();
-                                        if let Some(p) = guard.get_mut(name) {
-                                            p.hp = p.hp.saturating_sub(npc_damage.unwrap_or(0) / 2);
-                                            Some(p.hp)
-                                        } else {
-                                            None
+                                            let _out_combat = {
+                                                let mut guard = players.lock().unwrap();
+                                                guard.get_mut(name).map(|p| p.combat = "flee".to_string())
+                                            };
+                                            let msg = format!("you flee the combat\n");
+                                            stream.write(msg.as_bytes()).expect("ERROR");
+                                            break;
                                         }
-                                    };
-                                    let combat_status = {
-                                        let mut guard = players.lock().unwrap();
-                                        guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
-                                    };
-                                    let msg_repost = format!(
-                                        "repost {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: {}, status: {}}}\n",
-                                        hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), npc_damage.unwrap_or(0) / 2, combat_status
-                                    );
-                                    stream.write_all(msg_repost.as_bytes()).expect("ERROR");
-                                }
-                                Some("FLEE") => {
-                                    {
-                                        let mut w = world.lock().unwrap();
-                                        if let Some(n) = w.npcs.get_mut(&npc_id) {
-                                            n.engaged_by = None;
+                                        Some("STATUS") => {
+                                            let in_combat = {
+                                                let mut guard = players.lock().unwrap();
+                                                guard.get_mut(name).map(|p| p.hp)
+                                            };
+                                            let combat_status = {
+                                                let mut guard = players.lock().unwrap();
+                                                guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
+                                            };
+                                            let msg = format!("OK {{hp={:?},max_hp: 100 ,status : {}}}\n", in_combat.unwrap_or(0), combat_status);
+                                            stream.write_all(msg.as_bytes()).expect("ERROR PRINT TATUS");
+                                        }
+                                        Some(cmd_inconnue) => {
+                                            stream.write_all(b"ERROR COMMANDE YOU CAN ATTACK DEFEND FLEEE STATUS\n").expect("Failder to write reponse");
+                                            println!("COMMANDE ERROR: {}", cmd_inconnue);
+                                        }
+                                        None => {
+                                            stream.write_all(b"ERROR COMMANDE YOU CAN ATTACK DEFEND FLEEE STATUS\n").expect("Failder to write reponse");
+                                            println!("COMMANDE ERROR");
                                         }
                                     }
-                                    let _out_combat = {
-                                        let mut guard = players.lock().unwrap();
-                                        guard.get_mut(name).map(|p| p.combat = "flee".to_string())
-                                    };
-                                    let msg = format!("you flee the combat\n");
-                                    stream.write(msg.as_bytes()).expect("ERROR");
-                                    break;
-                                }
-                                Some("STATUS") => {
-                                    let in_combat = {
-                                        let mut guard = players.lock().unwrap();
-                                        guard.get_mut(name).map(|p| p.hp)
-                                    };
-                                    let combat_status = {
-                                        let mut guard = players.lock().unwrap();
-                                        guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
-                                    };
-                                    let msg = format!("OK {{hp={:?},max_hp: 100 ,status : {}}}\n", in_combat.unwrap_or(0), combat_status);
-                                    stream.write_all(msg.as_bytes()).expect("ERROR PRINT TATUS");
-                                }
-                                Some(cmd_inconnue) => {
-                                    stream.write_all(b"ERROR COMMANDE YOU CAN ATTACK DEFEND FLEEE STATUS\n").expect("Failder to write reponse");
-                                    println!("COMMANDE ERROR: {}", cmd_inconnue);
-                                }
-                                None => {
-                                    stream.write_all(b"ERROR COMMANDE YOU CAN ATTACK DEFEND FLEEE STATUS\n").expect("Failder to write reponse");
-                                    println!("COMMANDE ERROR");
                                 }
                             }
                         }
                     }
+                    println!("USER USE LOOK");
                 }
-            }
-            println!("USER USE LOOK");
-        }
         Some(cmd_inconnue) => {
             stream.write_all(b"ERROR COMMANDE\n").expect("Failder to write reponse");
             println!("COMMANDE ERROR: {}", cmd_inconnue);
