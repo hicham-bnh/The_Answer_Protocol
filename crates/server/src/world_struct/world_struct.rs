@@ -29,6 +29,7 @@ pub struct Npc {
     pub stats: Stats,   
     #[serde(default)]
     pub respawn_seconds: Option<u32>,
+    pub engaged_by: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,6 +37,8 @@ pub struct Stats {
     pub hp: u32,
     #[serde(default)]
     pub damage: Option<u32>,
+    #[serde(default)]
+    pub max_hp: u32,
 }
 
 #[derive(Debug, Deserialize)]
