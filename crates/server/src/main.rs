@@ -17,8 +17,9 @@ pub struct Player {
     pub room: String,
     pub name: String,
     pub inventory: Vec<String>,
-    pub hp: u64,
-    pub combat: u64
+    pub hp: u32,
+    pub pv: u32,
+    pub combat: String
 }
 use protocol::command::parse_command;
 use protocol::command::connect_user;
