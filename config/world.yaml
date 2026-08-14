@@ -136,7 +136,6 @@ items:
 npcs:
   # Rôle 1 : dialogue simple
   npc.guard:
-    pub engaged_by: Option<String>,
     name: "Village Guard"
     role: "dialogue"
     hostile: false
