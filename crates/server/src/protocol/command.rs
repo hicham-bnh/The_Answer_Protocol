@@ -276,6 +276,16 @@ pub fn parse_command(
                                 let w = world.lock().unwrap();
                                 w.npcs.get(&npc_id).map(|n| n.name.clone())
                             };
+                            let npc_info = {
+                                let w = world.lock().unwrap();
+                                w.npcs.get(&npc_id).map(|n| (n.stats.hp, n.stats.damage, n.hostile))
+                            };
+                            let (_npc_hp, _npc_damage, npc_hostile) = npc_info.unwrap();
+                            if npc_hostile == false {
+                                let msh = format!("ERR 405 NPC_NOT_HOSTILE\n");
+                                stream.write(msh.as_bytes()).expect("ERROR");
+                                return ;
+                            }
                             if let Some(display_name) = npc_display_name {
                                 let can_engage = {
                                     let mut w = world.lock().unwrap();
@@ -293,7 +303,7 @@ pub fn parse_command(
                                 if !can_engage {
                                     stream.write_all(b"ERR NPC already in combat\n").expect("ERROR");
                                     return;
-                                }
+                                } 
                                 let msg = format!("combat with {}\n", display_name);
                                 stream.write_all(msg.as_bytes()).expect("ERROR");
                                 let _in_combat = {
@@ -303,7 +313,7 @@ pub fn parse_command(
                                 let stream_clone = stream.try_clone().expect("clone failed");
                                 let read_buf = BufReader::new(stream_clone);
                                 for line in read_buf.lines() {
-                                    let line = line.expect("erreur lecture ligne");
+                                    let line = line.expect("erreur reading ligne");
                                     let mut args = line.splitn(2, ' ');
                                     match args.next() {
                                         Some("ATTACK") => {
@@ -321,7 +331,7 @@ pub fn parse_command(
                                             };
                                             let (_npc_hp, _npc_damage, npc_hostile) = npc_info.unwrap();
                                             if _npc_hp < 1 {
-                                                let msg = format!("NO NPC here\n");
+                                                let msg = format!("ERR 404 NPC_NOT_FOUND\n");
                                                 stream.write_all(msg.as_bytes()).expect("ERROR");
                                                 let mut w = world.lock().unwrap();
                                                 if let Some(n) = w.npcs.get_mut(&npc_id) {
@@ -380,7 +390,6 @@ pub fn parse_command(
                                                         }
                                                     }
                                                 });
-        
                                                 break;
                                             } else if npc_hostile {
                                                 let combat_status = {
@@ -406,8 +415,6 @@ pub fn parse_command(
                                                     hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), npc_damage.unwrap_or(0), combat_status
                                                 );
                                                 stream.write_all(msg_repost.as_bytes()).expect("ERROR");
-        
-                                                // --- Mort du joueur ---
                                                 if hp.unwrap_or(0) < 1 {
                                                     let respawn_room = {
                                                         let w = world.lock().unwrap();
@@ -473,8 +480,6 @@ pub fn parse_command(
                                                 hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), npc_damage.unwrap_or(0) / 2, combat_status
                                             );
                                             stream.write_all(msg_repost.as_bytes()).expect("ERROR");
-        
-                                            // --- Mort du joueur ---
                                             if hp.unwrap_or(0) < 1 {
                                                 let respawn_room = {
                                                     let w = world.lock().unwrap();
@@ -538,7 +543,12 @@ pub fn parse_command(
                                 }
                             }
                         }
-                    }
+                        else {
+                            let msg = format!("ERR 404 NPC_NOT_FOUND\n");
+                            stream.write_all(msg.as_bytes()).expect("ERROR");
+                            return ;
+                        }
+                        }
                     println!("USER USE LOOK");
                 }
         Some(cmd_inconnue) => {
