@@ -1,3 +1,5 @@
+use std::arch::x86_64::_MM_FROUND_RINT;
+use std::fmt::format;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::net::TcpStream;
@@ -197,6 +199,10 @@ pub fn parse_command(
                         }
                     }
                 }
+                else {
+                    let msg_error = format!("ERR 404 ITEM_NOT_FOUND\n");
+                    stream.write_all(msg_error.as_bytes()).expect("ERROR");
+                }
             }
             println!("USER USE TAKE");
         }
@@ -219,6 +225,10 @@ pub fn parse_command(
                                     let msg = format!("OK dropped={}\n", items_to_drop);
                                     stream.write_all(msg.as_bytes()).expect("Failed to write response");
                                 }
+                            }
+                            else {
+                                let msg_error = format!("ERR 404 ITEM_NOT_IN_INVENTORY\n");
+                                stream.write_all(msg_error.as_bytes()).expect("ERROR\n");
                             }
             }
             println!("USER USE LOOK");
