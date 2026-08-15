@@ -1,5 +1,5 @@
-use std::arch::x86_64::_MM_FROUND_RINT;
-use std::fmt::format;
+// use std::arch::x86_64::_MM_FROUND_RINT;
+// use std::fmt::format;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::net::TcpStream;
@@ -36,7 +36,9 @@ pub fn connect_user(
                         inventory: vec![],
                         hp: 100,
                         pv: 15,
-                        combat: "not in combat".to_string()
+                        combat: "not in combat".to_string(),
+                        quest_to_do: vec![],
+                        quest_dine: vec![]
                     };
                     guard.insert(name.clone(), player);
                     stream.write_all(b"OK connected\n").expect("write failed");
@@ -142,10 +144,12 @@ pub fn parse_command(
             println!("USER USE MOVE");
         }
         Some("QUIT") => {
-            println!("{} QUIT", name);
+            let _quit_server = {
             let mut guard = players.lock().unwrap();
             guard.remove(name);
             stream.write_all(b"OK bye\n").expect("Failder to write reponse");
+            };
+            println!("{} QUIT", name);
         }
         Some("CHAT") => {
             let mut chat_args = args.next().expect("REASON").splitn(2, ' ');
@@ -246,12 +250,34 @@ pub fn parse_command(
             println!("USER USE LOOK");
         }
         Some("TALK") => {
-            stream.write_all(b"OK\n").expect("Failder to write reponse");
-            println!("USER USE LOOK");
-        }
-        Some("ATTACK") => {
-            stream.write_all(b"OK\n").expect("Failder to write reponse");
-            println!("USER USE LOOK");
+            let room = {
+                let mut guard = players.lock().unwrap();
+                guard.get_mut(name).map(|p| p.room.clone())
+            };
+            if let Some(room) = room {
+                let npc_name = {
+                    let w = world.lock().unwrap();
+                    w.world.locations.get(&room)
+                        .and_then(|loc| loc.npcs.first())
+                        .cloned()
+                };
+                if let Some(npc_id) = npc_name {
+                    let npc_display_dialogue = {
+                        let w = world.lock().unwrap();
+                        w.npcs.get(&npc_id).map(|n| n.dialogue.clone())
+                    };
+                    if let Some(dialogues) = npc_display_dialogue.as_ref() {
+                        for dialogue in dialogues {
+                            let msg = format!("{}\n", dialogue);
+                            stream.write_all(msg.as_bytes()).expect("ERROR\n");
+                        }
+                    }
+                }
+                else {
+                    let msg_error = format!("ERR 404 NPC_NOT_FOUND\n");
+                    stream.write_all(msg_error.as_bytes()).expect("ERROR\n");
+                }
+            }
         }
         Some("STATUS") => {
             let mut guard = players.lock().unwrap();
