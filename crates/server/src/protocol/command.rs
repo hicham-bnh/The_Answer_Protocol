@@ -1,9 +1,12 @@
+use std::fmt::format;
 // use std::arch::x86_64::_MM_FROUND_RINT;
 // use std::fmt::format;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::net::TcpStream;
 use std::io::{Write, BufReader, BufRead};
+use tokio::runtime::EnterGuard;
+
 use crate::Player;
 use std::thread;
 use std::time::Duration;
@@ -38,7 +41,9 @@ pub fn connect_user(
                         pv: 15,
                         combat: "not in combat".to_string(),
                         quest_to_do: vec![],
-                        quest_dine: vec![]
+                        quest_dine: vec![],
+                        group: None,
+                        invite_from: None
                     };
                     guard.insert(name.clone(), player);
                     stream.write_all(b"OK connected\n").expect("write failed");
@@ -70,12 +75,30 @@ pub fn connect_user(
 
 
 
+pub fn leave_group(name: &str, players: &Arc<Mutex<HashMap<String, Player>>>) {
+    let mut guard = players.lock().unwrap();
+    let my_group = match guard.get(name).and_then(|p| p.group.clone()) {
+        Some(g) => g,
+        None => return,
+    };
+    if let Some(player) = guard.get_mut(name) {
+        player.group = None;
+    }
+    for (client_name, client_stream) in guard.iter_mut() {
+        if client_name != name && client_stream.group.as_deref() == Some(my_group.as_str()) {
+            let msg_evt = format!("EVT GROUP LEAVE {}\n", name);
+            let _ = client_stream.stream.lock().unwrap().write_all(msg_evt.as_bytes());
+        }
+    }
+}
+
 pub fn parse_command(
     line: &str,
     stream: &mut TcpStream,
     players: &Arc<Mutex<HashMap<String, Player>>>,
     name: &str,
-    world: &Arc<Mutex<GameWorld>>
+    world: &Arc<Mutex<GameWorld>>,
+    next_group_id: &Arc<Mutex<u32>>
     ) {
     let mut args = line.splitn(2, ' ');
     match args.next(){
@@ -144,6 +167,7 @@ pub fn parse_command(
             println!("USER USE MOVE");
         }
         Some("QUIT") => {
+            leave_group(name, players);
             let _quit_server = {
             let mut guard = players.lock().unwrap();
             guard.remove(name);
@@ -153,7 +177,8 @@ pub fn parse_command(
         }
         Some("CHAT") => {
             let mut chat_args = args.next().expect("REASON").splitn(2, ' ');
-            if chat_args.next() == Some("GLOBAL"){
+            let sub_chat = chat_args.next();
+            if sub_chat == Some("GLOBAL"){
                 //let target = sub_args.next().unwrap_or("");
                 let chat_msg = chat_args.next().unwrap_or("");
                 let mut guard = players.lock().unwrap();
@@ -162,6 +187,26 @@ pub fn parse_command(
                 {
                     let msg = format!("EVT GLOBAL CHAT {} {}\n", name, chat_msg);
                     client_steam.stream.lock().unwrap().write_all(msg.as_bytes()).expect("write failed");
+                }
+            }
+            else if sub_chat == Some("GROUP") {
+                let chat_msg = chat_args.next().unwrap_or("");
+                let mut guard = players.lock().unwrap();
+                let my_group = guard.get(name).and_then(|p| p.group.clone());
+                match my_group {
+                    None => {
+                        stream.write_all(b"ERR 401 NOT_IN_GROUP\n").expect("Failder to write reponse");
+                    }
+                    Some(my_group) => {
+                        stream.write_all(b"OK\n").expect("Failder to write reponse");
+                        for (_client_name, client_steam) in guard.iter_mut()
+                        {
+                            if client_steam.group.as_deref() == Some(my_group.as_str()) {
+                                let msg = format!("EVT GROUP CHAT {} {}\n", name, chat_msg);
+                                client_steam.stream.lock().unwrap().write_all(msg.as_bytes()).expect("write failed");
+                            }
+                        }
+                    }
                 }
             }
             println!("{} USE CHAT", name);
@@ -177,8 +222,155 @@ pub fn parse_command(
             println!("USER USE LOOK");
         }
         Some("GROUP") => {
-            stream.write_all(b"OK\n").expect("Failder to write reponse");
-            println!("USER USE LOOK");
+            if let  Some(rest) = args.next(){
+                let mut grp_args = rest.splitn(2, ' ');
+                match grp_args.next(){
+                    Some("CREATE") => {
+                        let already_in_group = {
+                            let guard = players.lock().unwrap();
+                            guard.get(name).map(|p| p.group.is_some()).unwrap_or(false)
+                        };
+                        if already_in_group {
+                            let msg_error = "ERR 402 ALREADY_IN_GROUP\n";
+                            let _ = stream.write_all(msg_error.as_bytes());
+                            return;
+                        }
+                        let new_id = {
+                            let mut counter = next_group_id.lock().unwrap();
+                            let id = format!("grp_{}", *counter);
+                            *counter += 1;
+                            id
+                        };
+                        {
+                            let mut guard = players.lock().unwrap();
+                            if let Some(player) = guard.get_mut(name) {
+                                player.group = Some(new_id.clone());
+                            }
+                        }
+                        let msg_success = format!("OK group={}\n", new_id);
+                        let _ = stream.write_all(msg_success.as_bytes());
+                        return;
+                    }
+                    Some("INVITE") => {
+                        let name_player = grp_args.next();
+                        let name_ply = match name_player {
+                            Some(name) if !name.trim().is_empty() => name,
+                            _ => {
+                                let msg_error = "ERR NAME OF THE PLAYER\n";
+                                let _ = stream.write_all(msg_error.as_bytes());
+                                return;
+                            }
+                        };
+                        let my_group = {
+                            let guard = players.lock().unwrap();
+                            guard.get(name).and_then(|p| p.group.clone())
+                        };
+                        if my_group.is_none() {
+                            let msg_error = "ERR 401 NOT_IN_GROUP\n";
+                            let _ = stream.write_all(msg_error.as_bytes());
+                            return;
+                        }
+                        {
+                            let mut guard = players.lock().unwrap();
+                            if !guard.contains_key(name_ply) {
+                                let _ = stream.write_all(b"ERR 404 PLAYER_NOT_FOUND\n");
+                                return;
+                            }
+                            if let Some(target) = guard.get_mut(name_ply) {
+                                target.invite_from = Some(name.to_string());
+                                let msg_evt = format!("EVT GROUP INVITE {}\n", name);
+                                let _ = target.stream.lock().unwrap().write_all(msg_evt.as_bytes());
+                            }
+                        }
+                        let _ = stream.write_all(b"OK\n");
+                        return;
+                    }
+                    Some("JOIN") => {
+                        let leader_name = grp_args.next();
+                        let leader = match leader_name {
+                            Some(n) if !n.trim().is_empty() => n,
+                            _ => {
+                                let _ = stream.write_all(b"ERR USAGE: GROUP JOIN <leader>\n");
+                                return;
+                            }
+                        };
+                        let already_in_group = {
+                            let guard = players.lock().unwrap();
+                            guard.get(name).map(|p| p.group.is_some()).unwrap_or(false)
+                        };
+                        if already_in_group {
+                            let _ = stream.write_all(b"ERR 402 ALREADY_IN_GROUP\n");
+                            return;
+                        }
+                        let invited = {
+                            let guard = players.lock().unwrap();
+                            guard.get(name).map(|p| p.invite_from.as_deref() == Some(leader)).unwrap_or(false)
+                        };
+                        if !invited {
+                            let _ = stream.write_all(b"ERR 403 NOT_INVITED\n");
+                            return;
+                        }
+                        let leader_group = {
+                            let guard = players.lock().unwrap();
+                            guard.get(leader).and_then(|p| p.group.clone())
+                        };
+                        let leader_group = match leader_group {
+                            Some(g) => g,
+                            None => {
+                                let _ = stream.write_all(b"ERR 404 PLAYER_NOT_FOUND\n");
+                                return;
+                            }
+                        };
+                        {
+                            let mut guard = players.lock().unwrap();
+                            if let Some(player) = guard.get_mut(name) {
+                                player.invite_from = None;
+                                player.group = Some(leader_group.clone());
+                            }
+                        }
+                        let msg_success = format!("OK group={}\n", leader_group);
+                        let _ = stream.write_all(msg_success.as_bytes());
+                        {
+                            let mut guard = players.lock().unwrap();
+                            for (client_name, client_stream) in guard.iter_mut() {
+                                if client_name != name && client_stream.group.as_deref() == Some(leader_group.as_str()) {
+                                    let msg_evt = format!("EVT GROUP JOIN {}\n", name);
+                                    let _ = client_stream.stream.lock().unwrap().write_all(msg_evt.as_bytes());
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    Some("LEAVE") => {
+                        let my_group = {
+                            let guard = players.lock().unwrap();
+                            guard.get(name).and_then(|p| p.group.clone())
+                        };
+                        if my_group.is_none() {
+                            let _ = stream.write_all(b"ERR 401 NOT_IN_GROUP\n");
+                            return;
+                        }
+                        leave_group(name, players);
+                        let _ = stream.write_all(b"OK\n");
+                        return;
+                    }
+                    Some(cmd_inconnue) => {
+                        stream.write_all(b"ERROR COMMANDE\n").expect("Failder to write reponse");
+                        println!("COMMANDE ERROR: {}", cmd_inconnue);
+                        return ;
+                    }
+                    None => {
+                        stream.write_all(b"ERROR COMMANDE\n").expect("Failder to write reponse");
+                        println!("COMMANDE ERROR");
+                        return ;
+                    }
+                }
+            }
+            else {
+                stream.write_all(b"ERROR COMMANDE\n").expect("Failder to write reponse");
+                println!("COMMANDE ERROR");
+                return ;
+            }
         }
         Some("TAKE") => {
             let Some(rest) = args.next() else {

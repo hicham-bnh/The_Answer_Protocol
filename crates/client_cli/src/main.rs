@@ -43,8 +43,8 @@ fn main() {
             }
             let _ = handle.join();
         }
-        Err(e) => {
-            println!("errer conection to the server : {}", e);
+        Err(_) => {
+            println!("ERR 900 CONNECTION_FAILED");
         }
     }
 }

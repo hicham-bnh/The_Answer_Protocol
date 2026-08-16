@@ -21,7 +21,9 @@ pub struct Player {
     pub pv: u32,
     pub combat: String,
     pub quest_to_do: Vec<String>,
-    pub quest_dine: Vec<String>
+    pub quest_dine: Vec<String>,
+    pub group: Option<String>,
+    pub invite_from: Option<String>
 }
 use protocol::command::parse_command;
 use protocol::command::connect_user;
@@ -34,7 +36,7 @@ fn parse_world() -> GameWorld {
     game_world
 }
 
-fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, Player>>>, spawn_room: String, world: Arc<Mutex<GameWorld>>){
+fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, Player>>>, spawn_room: String, world: Arc<Mutex<GameWorld>>, next_group_id: Arc<Mutex<u32>>){
     let mut is_connect = false;
     let mut name = String::new();
     let stream_clone = stream.try_clone().expect("clone");
@@ -47,8 +49,9 @@ fn lunch(mut stream: TcpStream, players: Arc<Mutex<HashMap<String, Player>>>, sp
             (is_connect, name) = connect_user(&line, &mut stream, &players, spawn_room.clone());
             continue;
         }
-        parse_command(&line, &mut stream, &players, &name, &world);
+        parse_command(&line, &mut stream, &players, &name, &world, &next_group_id);
     }
+    protocol::command::leave_group(&name, &players);
 }
 
 fn main(){
@@ -57,13 +60,15 @@ fn main(){
     let spawn_room = game_world.lock().unwrap().world.start_location.clone();
     println!("Server run");
     let players: Arc<Mutex<HashMap<String, Player>>> = Arc::new(Mutex::new(HashMap::new()));
+    let next_group_id: Arc<Mutex<u32>> = Arc::new(Mutex::new(1));
     for stream in listener.incoming(){
         match stream{
             Ok(stream) => {
                 let players_clone = Arc::clone(&players);
                 let world_clone =  Arc::clone(&game_world);
+                let next_group_id_clone = Arc::clone(&next_group_id);
                 let value = spawn_room.clone();
-                std::thread::spawn(move || lunch(stream, players_clone, value.clone(), world_clone));
+                std::thread::spawn(move || lunch(stream, players_clone, value.clone(), world_clone, next_group_id_clone));
             }
             Err(e) => {
                 eprintln!("Failde to conection: {}", e);
