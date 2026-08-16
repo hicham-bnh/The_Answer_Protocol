@@ -1,79 +1,214 @@
-use std::fmt::format;
-// use std::arch::x86_64::_MM_FROUND_RINT;
-// use std::fmt::format;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::net::TcpStream;
-use std::io::{Write, BufReader, BufRead};
-use tokio::runtime::EnterGuard;
-
+use std::io::Write;
 use crate::Player;
 use std::thread;
-use std::time::Duration;
-
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::world_struct::world_struct::GameWorld;
 
-pub fn connect_user(
-    line: &str,
-    stream: &mut TcpStream,
-    players: &Arc<Mutex<HashMap<String, Player>>>, 
-    spawn_room: String
-    ) -> (bool, String){
-    let mut args = line.splitn(2, ' ');
-    let mut name = String::new();
-    let mut guard = players.lock().unwrap();
-    match args.next(){
-        Some("CONNECT") => {
-            if let Some(arg_name) = args.next() {
-                name.push_str(arg_name);
-                if guard.contains_key(&name) {
-                    stream.write_all(b"ERR 201 NAME_IN_USE\n").expect("write failed");
-                    return (false, String::new());
-                }
-                else {
-                    let stream_for_map = stream.try_clone().expect("clone failed");
-                    let player = Player {
-                        stream: Mutex::new(stream_for_map),
-                        room: spawn_room.to_string(),
-                        name: name.to_string(),
-                        inventory: vec![],
-                        hp: 100,
-                        pv: 15,
-                        combat: "not in combat".to_string(),
-                        quest_to_do: vec![],
-                        quest_dine: vec![],
-                        group: None,
-                        invite_from: None
-                    };
-                    guard.insert(name.clone(), player);
-                    stream.write_all(b"OK connected\n").expect("write failed");
-                    return (true, name);
-                }
-            }
-            else {
-                stream.write_all(b"please connect with your username\n").expect("Failder to write reponse");
-                return (false, String::new());
-            }
-        }
-        Some("QUIT") => {
-            stream.write_all(b"OK bye\n").expect("Failder to write reponse");
-            println!("USER QUIT");
-            return (false, String::new());
-        }
-        Some(cmd_inconnue) => {
-            stream.write_all(b"please connect\n").expect("Failder to write reponse");
-            println!("COMMANDE ERROR: {}", cmd_inconnue);
-            return (false, String::new());
-        }
-        _none => {
-            stream.write_all(b"ERROR COMMANDE\n").expect("Failder to write reponse");
-            println!("COMMANDE ERROR");
-            return (false, String::new());
+use serde::Serialize;
+use serde_json::json;
+
+#[derive(Serialize)]
+struct RoomInfo {
+    id: String,
+    name: String,
+    description: String,
+    exits: HashMap<String, String>,
+}
+
+#[derive(Serialize)]
+struct LookReply {
+    room: RoomInfo,
+    players: Vec<String>,
+    items: Vec<String>,
+    npcs: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct StatusReply {
+    hp: u32,
+    max_hp: u32,
+    status: String,
+}
+
+#[derive(Serialize)]
+struct WhoReply {
+    room: Vec<String>,
+    server: u32,
+}
+
+#[derive(Serialize)]
+struct TalkReply {
+    npc: String,
+    dialogue: String,
+}
+
+#[derive(Serialize)]
+struct CombatReply {
+    action: String,
+    attacker_hp: u32,
+    target_hp: u32,
+    damage_dealt: u32,
+    damage_taken: u32,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+#[derive(Serialize)]
+struct QuestReply {
+    quest_id: String,
+    status: String,
+    progress: String,
+}
+
+
+fn send_err(stream: &mut TcpStream, code: &str) {
+    let _ = stream.write_all(format!("ERR {}\n", code).as_bytes());
+}
+pub fn log(level: &str, event: &str, details: serde_json::Value) {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let entry = json!({
+        "ts": ts,
+        "level": level,
+        "event": event,
+        "details": details,
+    });
+    println!("{}", entry);
+}
+
+fn broadcast_room(guard: &mut HashMap<String, Player>, room: &str, msg: &str, exclude: Option<&str>) {
+    for (client_name, client) in guard.iter_mut() {
+        if client.room == room && Some(client_name.as_str()) != exclude {
+            let _ = client.stream.lock().unwrap().write_all(msg.as_bytes());
         }
     }
 }
 
+fn broadcast_all(guard: &mut HashMap<String, Player>, msg: &str, exclude: Option<&str>) {
+    for (client_name, client) in guard.iter_mut() {
+        if Some(client_name.as_str()) != exclude {
+            let _ = client.stream.lock().unwrap().write_all(msg.as_bytes());
+        }
+    }
+}
 
+fn find_npc_in_room(w: &GameWorld, room: &str, npc_arg: &str) -> Option<String> {
+    let loc = w.world.locations.get(room)?;
+    loc.npcs
+        .iter()
+        .find(|id| id.as_str() == npc_arg || w.npcs.get(id.as_str()).map(|n| n.name == npc_arg).unwrap_or(false))
+        .cloned()
+}
+
+fn apply_take_quest_progress(player: &mut Player, w: &GameWorld, item_id: &str) {
+    for qid in player.quest_to_do.clone() {
+        if let Some(quest) = w.quests.get(&qid) {
+            if quest.objective.item.as_deref() == Some(item_id) {
+                let total = quest.objective.count.unwrap_or(1);
+                let entry = player.quest_progress.entry(qid).or_insert(0);
+                if *entry < total {
+                    *entry += 1;
+                }
+            }
+        }
+    }
+}
+fn apply_kill_quest_progress(player: &mut Player, w: &GameWorld, npc_id: &str) {
+    for qid in player.quest_to_do.clone() {
+        if let Some(quest) = w.quests.get(&qid) {
+            if quest.objective.target.as_deref() == Some(npc_id) {
+                let total = quest.objective.count.unwrap_or(1);
+                let entry = player.quest_progress.entry(qid).or_insert(0);
+                if *entry < total {
+                    *entry += 1;
+                }
+            }
+        }
+    }
+}
+
+pub fn connect_user(
+    line: &str,
+    stream: &mut TcpStream,
+    players: &Arc<Mutex<HashMap<String, Player>>>,
+    spawn_room: String,
+) -> (bool, String) {
+    let mut args = line.splitn(2, ' ');
+    match args.next() {
+        Some("CONNECT") => {
+            let Some(arg_name) = args.next() else {
+                send_err(stream, "400 MALFORMED_COMMAND");
+                return (false, String::new());
+            };
+            let arg_name = arg_name.trim();
+            if arg_name.is_empty() || arg_name.contains(char::is_whitespace) {
+                send_err(stream, "400 MALFORMED_COMMAND");
+                return (false, String::new());
+            }
+            let name = arg_name.to_string();
+
+            let mut guard = players.lock().unwrap();
+            if guard.contains_key(&name) {
+                send_err(stream, "201 NAME_IN_USE");
+                return (false, String::new());
+            }
+
+            let stream_for_map = match stream.try_clone() {
+                Ok(s) => s,
+                Err(_) => {
+                    send_err(stream, "500 INTERNAL_ERROR");
+                    return (false, String::new());
+                }
+            };
+
+            let player = Player {
+                stream: Mutex::new(stream_for_map),
+                room: spawn_room.to_string(),
+                name: name.clone(),
+                inventory: vec![],
+                hp: 100,
+                max_hp: 100,
+                pv: 15,
+                combat: "healthy".to_string(),
+                quest_to_do: vec![],
+                quest_dine: vec![],
+                quest_progress: HashMap::new(),
+                target_npc: None,
+                group: None,
+                invite_from: None,
+            };
+            guard.insert(name.clone(), player);
+            let _ = stream.write_all(b"OK connected\n");
+            let enter_evt = format!("EVT ROOM PRESENCE ENTER {}\n", name);
+            broadcast_room(&mut guard, &spawn_room, &enter_evt, Some(&name));
+            let stats_evt = format!("EVT STATS players={}\n", guard.len());
+            broadcast_all(&mut guard, &stats_evt, None);
+
+            log("INFO", "player_connected", json!({"player": name, "room": spawn_room}));
+            (true, name)
+        }
+        Some("QUIT") => {
+            let _ = stream.write_all(b"OK bye\n");
+            log("INFO", "quit_before_connect", json!({}));
+            (false, String::new())
+        }
+        Some(cmd_inconnue) => {
+            send_err(stream, "100 NOT_CONNECTED");
+            log("WARN", "command_before_connect", json!({"command": cmd_inconnue}));
+            (false, String::new())
+        }
+        None => {
+            send_err(stream, "400 MALFORMED_COMMAND");
+            (false, String::new())
+        }
+    }
+}
 
 pub fn leave_group(name: &str, players: &Arc<Mutex<HashMap<String, Player>>>) {
     let mut guard = players.lock().unwrap();
@@ -84,12 +219,34 @@ pub fn leave_group(name: &str, players: &Arc<Mutex<HashMap<String, Player>>>) {
     if let Some(player) = guard.get_mut(name) {
         player.group = None;
     }
+    let msg_evt = format!("EVT GROUP LEAVE {}\n", name);
     for (client_name, client_stream) in guard.iter_mut() {
         if client_name != name && client_stream.group.as_deref() == Some(my_group.as_str()) {
-            let msg_evt = format!("EVT GROUP LEAVE {}\n", name);
             let _ = client_stream.stream.lock().unwrap().write_all(msg_evt.as_bytes());
         }
     }
+}
+pub fn disconnect_player(name: &str, players: &Arc<Mutex<HashMap<String, Player>>>) {
+    if name.is_empty() {
+        return;
+    }
+    let room = {
+        let mut guard = players.lock().unwrap();
+        let room = guard.get(name).map(|p| p.room.clone());
+        guard.remove(name);
+        room
+    };
+    {
+        let mut guard = players.lock().unwrap();
+        if let Some(room) = &room {
+            let leave_evt = format!("EVT ROOM PRESENCE LEAVE {}\n", name);
+            broadcast_room(&mut guard, room, &leave_evt, None);
+        }
+        let stats_evt = format!("EVT STATS players={}\n", guard.len());
+        broadcast_all(&mut guard, &stats_evt, None);
+    }
+    leave_group(name, players);
+    log("INFO", "player_disconnected", json!({"player": name}));
 }
 
 pub fn parse_command(
@@ -98,141 +255,164 @@ pub fn parse_command(
     players: &Arc<Mutex<HashMap<String, Player>>>,
     name: &str,
     world: &Arc<Mutex<GameWorld>>,
-    next_group_id: &Arc<Mutex<u32>>
-    ) {
+    next_group_id: &Arc<Mutex<u32>>,
+) {
     let mut args = line.splitn(2, ' ');
-    match args.next(){
+    let cmd = args.next();
+    if let Some(cmd_name) = cmd {
+        let in_combat = {
+            let guard = players.lock().unwrap();
+            guard.get(name).map(|p| p.combat == "in_combat").unwrap_or(false)
+        };
+        let allowed = matches!(cmd_name, "ATTACK" | "DEFEND" | "FLEE" | "STATUS" | "CHAT");
+        if in_combat && !allowed {
+            send_err(stream, "409 IN_COMBAT");
+            log("WARN", "command_rejected_in_combat", json!({"player": name, "command": cmd_name}));
+            return;
+        }
+    }
+    match cmd {
         Some("CONNECT") => {
-            stream.write_all(b"you are connect yet\n").expect("Failder to write reponse");
+            send_err(stream, "101 ALREADY_CONNECTED");
         }
         Some("LOOK") => {
             let mut guard = players.lock().unwrap();
-            let mut room_str = String::new();
-            let mut players: Vec<String> = Vec::new();
+            let room_str = match guard.get(name) {
+                Some(player) => player.room.clone(),
+                None => return,
+            };
+            let mut players_list: Vec<String> = Vec::new();
+            for (client_name, client_steam) in guard.iter_mut() {
+                if client_steam.room == room_str {
+                    players_list.push(client_name.to_string());
+                }
+            }
             if let Some(player) = guard.get(name) {
-                room_str = player.room.clone();
-            }
-            for (_client_name, client_steam) in guard.iter_mut(){
-                 if client_steam.room.to_string() == room_str {
-                     players.push(_client_name.to_string());
-                 }
-             }
-             if let Some(player) = guard.get(name) {
                 let w = world.lock().unwrap();
-                let items = &w.world.locations.get(&room_str).unwrap().items;
-                let npcs = &w.world.locations.get(&room_str).unwrap().npcs;
-                let msg = format!(
-                    "OK {{ \"room\": {}, \"players\": {:?}, \"items\": {:?}, , \"npcs\": {:?} }}\n",
-                    room_str, players, items, npcs
-                );
+                let loc = match w.world.locations.get(&room_str) {
+                    Some(l) => l,
+                    None => return,
+                };
+                let reply = LookReply {
+                    room: RoomInfo {
+                        id: room_str.clone(),
+                        name: loc.name.clone(),
+                        description: loc.description.clone(),
+                        exits: loc.exits.clone(),
+                    },
+                    players: players_list,
+                    items: loc.items.clone(),
+                    npcs: loc.npcs.clone(),
+                };
+                let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
                 let mut guard_stream = player.stream.lock().unwrap();
-                guard_stream.write_all(msg.as_bytes()).expect("Failder to write reponse");
+                let _ = guard_stream.write_all(msg.as_bytes());
             }
-            println!("USER USE LOOK");
+            log("INFO", "look", json!({"player": name, "room": room_str}));
         }
         Some("MOVE") => {
             let Some(rest) = args.next() else {
-                    stream.write_all(b"ERR usage: MOVE <direction>\n").ok();
-                    println!("USER USE MOVE (missing arg)");
-                    return;
-                };
+                send_err(stream, "400 MALFORMED_COMMAND");
+                return;
+            };
             let mut chat_args = rest.splitn(2, ' ');
             let move_to = chat_args.next().unwrap_or("");
             let mut guard = players.lock().unwrap();
             if let Some(player) = guard.get_mut(name) {
                 let room_str = player.room.clone();
                 let w = world.lock().unwrap();
-                let exists = &w.world.locations.get(&room_str).unwrap().exits;
-                if let Some(room_to) = exists.get(move_to) {
+                let exits = &w.world.locations.get(&room_str).unwrap().exits;
+                if let Some(room_to) = exits.get(move_to) {
                     let room_to = room_to.clone();
                     let msg = format!("OK room={}\n", room_to);
-                    stream.write_all(msg.as_bytes()).expect("Failder to write reponse");
+                    let _ = stream.write_all(msg.as_bytes());
                     player.room = room_to.clone();
-                    for (_client_name, client_steam) in guard.iter_mut(){
-                         if client_steam.room.to_string() == room_str {
-                             let msg_evnt_leave = format!("EVT ROOM PRESENCE LEAVE {}\n", name);
-                             client_steam.stream.lock().unwrap().write_all(msg_evnt_leave.as_bytes()).expect("ERROR");
+
+                    let leave_evt = format!("EVT ROOM PRESENCE LEAVE {}\n", name);
+                    let enter_evt = format!("EVT ROOM PRESENCE ENTER {}\n", name);
+                    for (_client_name, client_steam) in guard.iter_mut() {
+                        if client_steam.room == room_str {
+                            let _ = client_steam.stream.lock().unwrap().write_all(leave_evt.as_bytes());
+                        } else if client_steam.room == room_to {
+                            let _ = client_steam.stream.lock().unwrap().write_all(enter_evt.as_bytes());
                         }
-                        else if client_steam.room.to_string() == room_to {
-                            let msg_evnt_enter = format!("EVT ROOM PRESENCE ENTER {}\n", name);
-                            client_steam.stream.lock().unwrap().write_all(msg_evnt_enter.as_bytes()).expect("ERROR");
-                        }
-                     }
-                }
-                else {
-                    stream.write_all(b"ERR 301 NO_EXIT\n").ok();
-                    return;
+                    }
+                    log("INFO", "player_moved", json!({"player": name, "from": room_str, "to": room_to}));
+                } else {
+                    send_err(stream, "301 NO_EXIT");
                 }
             }
-            println!("USER USE MOVE");
         }
         Some("QUIT") => {
-            leave_group(name, players);
-            let _quit_server = {
-            let mut guard = players.lock().unwrap();
-            guard.remove(name);
-            stream.write_all(b"OK bye\n").expect("Failder to write reponse");
-            };
-            println!("{} QUIT", name);
+            let _ = stream.write_all(b"OK bye\n");
+            log("INFO", "quit", json!({"player": name}));
         }
         Some("CHAT") => {
-            let mut chat_args = args.next().expect("REASON").splitn(2, ' ');
+            let Some(rest) = args.next() else {
+                send_err(stream, "400 MALFORMED_COMMAND");
+                return;
+            };
+            let mut chat_args = rest.splitn(2, ' ');
             let sub_chat = chat_args.next();
-            if sub_chat == Some("GLOBAL"){
-                //let target = sub_args.next().unwrap_or("");
+            if sub_chat == Some("GLOBAL") {
                 let chat_msg = chat_args.next().unwrap_or("");
                 let mut guard = players.lock().unwrap();
-                stream.write_all(b"OK\n").expect("Failder to write reponse");
-                for (_client_name, client_steam) in guard.iter_mut()
-                {
-                    let msg = format!("EVT GLOBAL CHAT {} {}\n", name, chat_msg);
-                    client_steam.stream.lock().unwrap().write_all(msg.as_bytes()).expect("write failed");
-                }
-            }
-            else if sub_chat == Some("GROUP") {
+                let _ = stream.write_all(b"OK\n");
+                let evt = format!("EVT GLOBAL CHAT {} {}\n", name, chat_msg);
+                broadcast_all(&mut guard, &evt, None);
+            } else if sub_chat == Some("GROUP") {
                 let chat_msg = chat_args.next().unwrap_or("");
                 let mut guard = players.lock().unwrap();
                 let my_group = guard.get(name).and_then(|p| p.group.clone());
                 match my_group {
-                    None => {
-                        stream.write_all(b"ERR 401 NOT_IN_GROUP\n").expect("Failder to write reponse");
-                    }
+                    None => send_err(stream, "401 NOT_IN_GROUP"),
                     Some(my_group) => {
-                        stream.write_all(b"OK\n").expect("Failder to write reponse");
-                        for (_client_name, client_steam) in guard.iter_mut()
-                        {
+                        let _ = stream.write_all(b"OK\n");
+                        let evt = format!("EVT GROUP CHAT {} {}\n", name, chat_msg);
+                        for (_client_name, client_steam) in guard.iter_mut() {
                             if client_steam.group.as_deref() == Some(my_group.as_str()) {
-                                let msg = format!("EVT GROUP CHAT {} {}\n", name, chat_msg);
-                                client_steam.stream.lock().unwrap().write_all(msg.as_bytes()).expect("write failed");
+                                let _ = client_steam.stream.lock().unwrap().write_all(evt.as_bytes());
                             }
                         }
                     }
                 }
+            } else if sub_chat == Some("ROOM") {
+                let chat_msg = chat_args.next().unwrap_or("");
+                let mut guard = players.lock().unwrap();
+                let room = guard.get(name).map(|p| p.room.clone()).unwrap_or_default();
+                let _ = stream.write_all(b"OK\n");
+                let evt = format!("EVT ROOM CHAT {} {}\n", name, chat_msg);
+                broadcast_room(&mut guard, &room, &evt, None);
+            } else {
+                send_err(stream, "400 MALFORMED_COMMAND");
             }
-            println!("{} USE CHAT", name);
+            log("INFO", "chat", json!({"player": name}));
         }
         Some("WHO") => {
-            let mut nmbr_players: u32 = 0;
-            let mut guard = players.lock().unwrap();
-            for _client_name in guard.iter_mut(){
-                nmbr_players += 1;
-            }
-            let msg = format!("OK {{{}}}\n", nmbr_players);
-            stream.write_all(msg.as_bytes()).expect("Failder to write reponse");
-            println!("USER USE LOOK");
+            let guard = players.lock().unwrap();
+            let room = guard.get(name).map(|p| p.room.clone()).unwrap_or_default();
+            let room_players: Vec<String> = guard
+                .iter()
+                .filter(|(_, p)| p.room == room)
+                .map(|(n, _)| n.clone())
+                .collect();
+            let server = guard.len() as u32;
+            let reply = WhoReply { room: room_players, server };
+            let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
+            let _ = stream.write_all(msg.as_bytes());
+            log("INFO", "who", json!({"player": name}));
         }
         Some("GROUP") => {
-            if let  Some(rest) = args.next(){
+            if let Some(rest) = args.next() {
                 let mut grp_args = rest.splitn(2, ' ');
-                match grp_args.next(){
+                match grp_args.next() {
                     Some("CREATE") => {
                         let already_in_group = {
                             let guard = players.lock().unwrap();
                             guard.get(name).map(|p| p.group.is_some()).unwrap_or(false)
                         };
                         if already_in_group {
-                            let msg_error = "ERR 402 ALREADY_IN_GROUP\n";
-                            let _ = stream.write_all(msg_error.as_bytes());
+                            send_err(stream, "402 ALREADY_IN_GROUP");
                             return;
                         }
                         let new_id = {
@@ -249,15 +429,13 @@ pub fn parse_command(
                         }
                         let msg_success = format!("OK group={}\n", new_id);
                         let _ = stream.write_all(msg_success.as_bytes());
-                        return;
                     }
                     Some("INVITE") => {
                         let name_player = grp_args.next();
                         let name_ply = match name_player {
-                            Some(name) if !name.trim().is_empty() => name,
+                            Some(n) if !n.trim().is_empty() => n,
                             _ => {
-                                let msg_error = "ERR NAME OF THE PLAYER\n";
-                                let _ = stream.write_all(msg_error.as_bytes());
+                                send_err(stream, "400 MALFORMED_COMMAND");
                                 return;
                             }
                         };
@@ -266,14 +444,13 @@ pub fn parse_command(
                             guard.get(name).and_then(|p| p.group.clone())
                         };
                         if my_group.is_none() {
-                            let msg_error = "ERR 401 NOT_IN_GROUP\n";
-                            let _ = stream.write_all(msg_error.as_bytes());
+                            send_err(stream, "401 NOT_IN_GROUP");
                             return;
                         }
                         {
                             let mut guard = players.lock().unwrap();
                             if !guard.contains_key(name_ply) {
-                                let _ = stream.write_all(b"ERR 404 PLAYER_NOT_FOUND\n");
+                                send_err(stream, "404 PLAYER_NOT_FOUND");
                                 return;
                             }
                             if let Some(target) = guard.get_mut(name_ply) {
@@ -283,14 +460,13 @@ pub fn parse_command(
                             }
                         }
                         let _ = stream.write_all(b"OK\n");
-                        return;
                     }
                     Some("JOIN") => {
                         let leader_name = grp_args.next();
                         let leader = match leader_name {
                             Some(n) if !n.trim().is_empty() => n,
                             _ => {
-                                let _ = stream.write_all(b"ERR USAGE: GROUP JOIN <leader>\n");
+                                send_err(stream, "400 MALFORMED_COMMAND");
                                 return;
                             }
                         };
@@ -299,7 +475,7 @@ pub fn parse_command(
                             guard.get(name).map(|p| p.group.is_some()).unwrap_or(false)
                         };
                         if already_in_group {
-                            let _ = stream.write_all(b"ERR 402 ALREADY_IN_GROUP\n");
+                            send_err(stream, "402 ALREADY_IN_GROUP");
                             return;
                         }
                         let invited = {
@@ -307,7 +483,7 @@ pub fn parse_command(
                             guard.get(name).map(|p| p.invite_from.as_deref() == Some(leader)).unwrap_or(false)
                         };
                         if !invited {
-                            let _ = stream.write_all(b"ERR 403 NOT_INVITED\n");
+                            send_err(stream, "403 NOT_INVITED");
                             return;
                         }
                         let leader_group = {
@@ -317,7 +493,7 @@ pub fn parse_command(
                         let leader_group = match leader_group {
                             Some(g) => g,
                             None => {
-                                let _ = stream.write_all(b"ERR 404 PLAYER_NOT_FOUND\n");
+                                send_err(stream, "404 PLAYER_NOT_FOUND");
                                 return;
                             }
                         };
@@ -332,14 +508,13 @@ pub fn parse_command(
                         let _ = stream.write_all(msg_success.as_bytes());
                         {
                             let mut guard = players.lock().unwrap();
+                            let msg_evt = format!("EVT GROUP JOIN {}\n", name);
                             for (client_name, client_stream) in guard.iter_mut() {
                                 if client_name != name && client_stream.group.as_deref() == Some(leader_group.as_str()) {
-                                    let msg_evt = format!("EVT GROUP JOIN {}\n", name);
                                     let _ = client_stream.stream.lock().unwrap().write_all(msg_evt.as_bytes());
                                 }
                             }
                         }
-                        return;
                     }
                     Some("LEAVE") => {
                         let my_group = {
@@ -347,37 +522,25 @@ pub fn parse_command(
                             guard.get(name).and_then(|p| p.group.clone())
                         };
                         if my_group.is_none() {
-                            let _ = stream.write_all(b"ERR 401 NOT_IN_GROUP\n");
+                            send_err(stream, "401 NOT_IN_GROUP");
                             return;
                         }
                         leave_group(name, players);
                         let _ = stream.write_all(b"OK\n");
-                        return;
                     }
-                    Some(cmd_inconnue) => {
-                        stream.write_all(b"ERROR COMMANDE\n").expect("Failder to write reponse");
-                        println!("COMMANDE ERROR: {}", cmd_inconnue);
-                        return ;
-                    }
-                    None => {
-                        stream.write_all(b"ERROR COMMANDE\n").expect("Failder to write reponse");
-                        println!("COMMANDE ERROR");
-                        return ;
+                    Some(_) | None => {
+                        send_err(stream, "400 MALFORMED_COMMAND");
                     }
                 }
-            }
-            else {
-                stream.write_all(b"ERROR COMMANDE\n").expect("Failder to write reponse");
-                println!("COMMANDE ERROR");
-                return ;
+            } else {
+                send_err(stream, "400 MALFORMED_COMMAND");
             }
         }
         Some("TAKE") => {
             let Some(rest) = args.next() else {
-                    stream.write_all(b"ERR usage: TAKE <item>\n").ok();
-                    println!("USER USE TAKE (missing arg)");
-                    return;
-                };
+                send_err(stream, "400 MALFORMED_COMMAND");
+                return;
+            };
             let mut chat_args = rest.splitn(2, ' ');
             let items_to_take = chat_args.next().unwrap_or("");
             let mut guard = players.lock().unwrap();
@@ -385,407 +548,578 @@ pub fn parse_command(
                 let room_player = player.room.clone();
                 let mut w = world.lock().unwrap();
                 let is_obtainable = w.items.get(items_to_take).map(|i| i.obtainable).unwrap_or(false);
-                if is_obtainable {
-                    if let Some(location) = w.world.locations.get_mut(&room_player) {
-                        if let Some(index) = location.items.iter().position(|x| x == items_to_take) {
-                            location.items.remove(index);
-                            player.inventory.push(items_to_take.to_string());
-                            let msg = format!("OK taken={}\n", items_to_take);
-                            stream.write_all(msg.as_bytes()).expect("Failed to write response");
-                        }
-                    }
+                if !is_obtainable {
+                    send_err(stream, "404 ITEM_NOT_FOUND");
+                    return;
                 }
-                else {
-                    let msg_error = format!("ERR 404 ITEM_NOT_FOUND\n");
-                    stream.write_all(msg_error.as_bytes()).expect("ERROR");
+                let taken = if let Some(location) = w.world.locations.get_mut(&room_player) {
+                    if let Some(index) = location.items.iter().position(|x| x == items_to_take) {
+                        location.items.remove(index);
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if taken {
+                    player.inventory.push(items_to_take.to_string());
+                    apply_take_quest_progress(player, &w, items_to_take);
+                    let msg = format!("OK taken={}\n", items_to_take);
+                    let _ = stream.write_all(msg.as_bytes());
+                    log("INFO", "item_taken", json!({"player": name, "item": items_to_take}));
+                } else {
+                    send_err(stream, "404 ITEM_NOT_FOUND");
                 }
             }
-            println!("USER USE TAKE");
         }
         Some("DROP") => {
             let Some(rest) = args.next() else {
-                    stream.write_all(b"ERR usage: TAKE <item>\n").ok();
-                    println!("USER USE TAKE (missing arg)");
-                    return;
-                };
+                send_err(stream, "400 MALFORMED_COMMAND");
+                return;
+            };
             let mut chat_args = rest.splitn(2, ' ');
             let items_to_drop = chat_args.next().unwrap_or("");
             let mut guard = players.lock().unwrap();
-                        if let Some(player) = guard.get_mut(name) {
-                            let room_player = player.room.clone();
-                            let mut w = world.lock().unwrap();
-                            if let Some(index) = player.inventory.iter().position(|x| x == items_to_drop) {
-                                if let Some(location) = w.world.locations.get_mut(&room_player) {
-                                    player.inventory.remove(index);
-                                    location.items.push(items_to_drop.to_string());
-                                    let msg = format!("OK dropped={}\n", items_to_drop);
-                                    stream.write_all(msg.as_bytes()).expect("Failed to write response");
-                                }
-                            }
-                            else {
-                                let msg_error = format!("ERR 404 ITEM_NOT_IN_INVENTORY\n");
-                                stream.write_all(msg_error.as_bytes()).expect("ERROR\n");
-                            }
+            if let Some(player) = guard.get_mut(name) {
+                let room_player = player.room.clone();
+                let mut w = world.lock().unwrap();
+                if let Some(index) = player.inventory.iter().position(|x| x == items_to_drop) {
+                    if let Some(location) = w.world.locations.get_mut(&room_player) {
+                        player.inventory.remove(index);
+                        location.items.push(items_to_drop.to_string());
+                        let msg = format!("OK dropped={}\n", items_to_drop);
+                        let _ = stream.write_all(msg.as_bytes());
+                        log("INFO", "item_dropped", json!({"player": name, "item": items_to_drop}));
+                    } else {
+                        send_err(stream, "404 ITEM_NOT_FOUND");
+                    }
+                } else {
+                    send_err(stream, "404 ITEM_NOT_IN_INVENTORY");
+                }
             }
-            println!("USER USE LOOK");
         }
         Some("INVENTORY") => {
             let guard = players.lock().unwrap();
             if let Some(player) = guard.get(name) {
-                let msg = format!("OK {:?}\n", player.inventory);
-                stream.write_all(msg.as_bytes()).expect("ERROR");
+                let msg = format!("OK {}\n", serde_json::to_string(&player.inventory).unwrap());
+                let _ = stream.write_all(msg.as_bytes());
+            } else {
+                send_err(stream, "404 PLAYER_NOT_FOUND");
             }
-            else {
-                let msg_error = format!("ERROR NO PLAYER\n");
-                stream.write_all(msg_error.as_bytes()).expect("ERROR");
-            }
-            println!("USER USE LOOK");
         }
         Some("TALK") => {
-            let room = {
-                let mut guard = players.lock().unwrap();
-                guard.get_mut(name).map(|p| p.room.clone())
+            let Some(rest) = args.next() else {
+                send_err(stream, "400 MALFORMED_COMMAND");
+                return;
             };
-            if let Some(room) = room {
-                let npc_name = {
-                    let w = world.lock().unwrap();
-                    w.world.locations.get(&room)
-                        .and_then(|loc| loc.npcs.first())
-                        .cloned()
-                };
-                if let Some(npc_id) = npc_name {
-                    let npc_display_dialogue = {
-                        let w = world.lock().unwrap();
-                        w.npcs.get(&npc_id).map(|n| n.dialogue.clone())
-                    };
-                    if let Some(dialogues) = npc_display_dialogue.as_ref() {
-                        for dialogue in dialogues {
-                            let msg = format!("{}\n", dialogue);
-                            stream.write_all(msg.as_bytes()).expect("ERROR\n");
-                        }
-                    }
+            let npc_arg = rest.trim();
+            let room = {
+                let guard = players.lock().unwrap();
+                guard.get(name).map(|p| p.room.clone())
+            };
+            let Some(room) = room else { return; };
+
+            let mut w = world.lock().unwrap();
+            let Some(npc_id) = find_npc_in_room(&w, &room, npc_arg) else {
+                send_err(stream, "404 NPC_NOT_FOUND");
+                return;
+            };
+
+            let dialogue = match w.npcs.get_mut(&npc_id) {
+                Some(n) if !n.dialogue.is_empty() => {
+                    let idx = n.dialogue_index % n.dialogue.len();
+                    n.dialogue_index = n.dialogue_index.wrapping_add(1);
+                    Some(n.dialogue[idx].clone())
                 }
-                else {
-                    let msg_error = format!("ERR 404 NPC_NOT_FOUND\n");
-                    stream.write_all(msg_error.as_bytes()).expect("ERROR\n");
+                _ => None,
+            };
+
+            match dialogue {
+                Some(line) => {
+                    let reply = TalkReply { npc: npc_id.clone(), dialogue: line };
+                    let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
+                    let _ = stream.write_all(msg.as_bytes());
+                    log("INFO", "npc_talk", json!({"player": name, "npc": npc_id}));
                 }
+                None => send_err(stream, "404 NPC_NOT_FOUND"),
             }
         }
         Some("STATUS") => {
-            let mut guard = players.lock().unwrap();
-            if let Some(player) = guard.get_mut(name) {
-                let msg = format!("OK status {{hp={}, combat={}}}\n", player.hp, player.combat);
-                stream.write_all(msg.as_bytes()).expect("ERROR PRINT TATUS");
+            let guard = players.lock().unwrap();
+            if let Some(player) = guard.get(name) {
+                let reply = StatusReply {
+                    hp: player.hp,
+                    max_hp: player.max_hp,
+                    status: player.combat.clone(),
+                };
+                let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
+                let _ = stream.write_all(msg.as_bytes());
             }
-            println!("USER USE STATUS");
         }
         Some("QUEST") => {
-            stream.write_all(b"OK\n").expect("Failder to write reponse");
-            println!("USER USE LOOK");
+            let Some(rest) = args.next() else {
+                send_err(stream, "400 MALFORMED_COMMAND");
+                return;
+            };
+            let npc_arg = rest.trim();
+            let room = {
+                let guard = players.lock().unwrap();
+                guard.get(name).map(|p| p.room.clone())
+            };
+            let Some(room) = room else { return; };
+
+            let npc_id = {
+                let w = world.lock().unwrap();
+                find_npc_in_room(&w, &room, npc_arg)
+            };
+            let Some(npc_id) = npc_id else {
+                send_err(stream, "404 NPC_NOT_FOUND");
+                return;
+            };
+
+            let offered: Vec<String> = {
+                let w = world.lock().unwrap();
+                w.npcs.get(&npc_id).map(|n| n.quests.clone()).unwrap_or_default()
+            };
+            if offered.is_empty() {
+                send_err(stream, "413 NO_QUEST_AVAILABLE");
+                return;
+            }
+            let mut guard = players.lock().unwrap();
+            let w = world.lock().unwrap();
+            let Some(player) = guard.get_mut(name) else { return; };
+            for qid in offered.iter() {
+                if player.quest_to_do.contains(qid) {
+                    let total = w.quests.get(qid).and_then(|q| q.objective.count).unwrap_or(1);
+                    let current = player.quest_progress.get(qid).copied().unwrap_or(0);
+                    if current >= total {
+                        player.quest_to_do.retain(|x| x != qid);
+                        player.quest_dine.push(qid.clone());
+                        if let Some(quest) = w.quests.get(qid) {
+                            player.inventory.push(quest.reward.item.clone());
+                        }
+                        let reply = QuestReply {
+                            quest_id: qid.clone(),
+                            status: "completed".to_string(),
+                            progress: "done".to_string(),
+                        };
+                        let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
+                        let _ = stream.write_all(msg.as_bytes());
+                        log("INFO", "quest_completed", json!({"player": name, "quest": qid}));
+                        return;
+                    } else {
+                        let reply = QuestReply {
+                            quest_id: qid.clone(),
+                            status: "in_progress".to_string(),
+                            progress: format!("{}/{}", current, total),
+                        };
+                        let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
+                        let _ = stream.write_all(msg.as_bytes());
+                        return;
+                    }
+                }
+            }
+            for qid in offered.iter() {
+                if !player.quest_dine.contains(qid) {
+                    player.quest_to_do.push(qid.clone());
+                    player.quest_progress.insert(qid.clone(), 0);
+                    let total = w.quests.get(qid).and_then(|q| q.objective.count).unwrap_or(1);
+                    let reply = QuestReply {
+                        quest_id: qid.clone(),
+                        status: "in_progress".to_string(),
+                        progress: format!("0/{}", total),
+                    };
+                    let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
+                    let _ = stream.write_all(msg.as_bytes());
+                    log("INFO", "quest_accepted", json!({"player": name, "quest": qid}));
+                    return;
+                }
+            }
+
+            send_err(stream, "412 QUEST_ALREADY_COMPLETED");
         }
         Some("QUESTS") => {
-            stream.write_all(b"OK\n").expect("Failder to write reponse");
-            println!("USER USE LOOK");
-        }
-        Some("COMBAT") => {
-                    let room = {
-                        let mut guard = players.lock().unwrap();
-                        guard.get_mut(name).map(|p| p.room.clone())
-                    };
-                    if let Some(room) = room {
-                        let npc_name = {
-                            let w = world.lock().unwrap();
-                            w.world.locations.get(&room)
-                                .and_then(|loc| loc.npcs.first())
-                                .cloned()
-                        };
-                        if let Some(npc_id) = npc_name {
-                            let npc_display_name = {
-                                let w = world.lock().unwrap();
-                                w.npcs.get(&npc_id).map(|n| n.name.clone())
-                            };
-                            let npc_info = {
-                                let w = world.lock().unwrap();
-                                w.npcs.get(&npc_id).map(|n| (n.stats.hp, n.stats.damage, n.hostile))
-                            };
-                            let (_npc_hp, _npc_damage, npc_hostile) = npc_info.unwrap();
-                            if npc_hostile == false {
-                                let msh = format!("ERR 405 NPC_NOT_HOSTILE\n");
-                                stream.write(msh.as_bytes()).expect("ERROR");
-                                return ;
-                            }
-                            if let Some(display_name) = npc_display_name {
-                                let can_engage = {
-                                    let mut w = world.lock().unwrap();
-                                    if let Some(n) = w.npcs.get_mut(&npc_id) {
-                                        if n.engaged_by.is_some() {
-                                            false
-                                        } else {
-                                            n.engaged_by = Some(name.to_string());
-                                            true
-                                        }
-                                    } else {
-                                        false
-                                    }
-                                };
-                                if !can_engage {
-                                    stream.write_all(b"ERR NPC already in combat\n").expect("ERROR");
-                                    return;
-                                } 
-                                let msg = format!("combat with {}\n", display_name);
-                                stream.write_all(msg.as_bytes()).expect("ERROR");
-                                let _in_combat = {
-                                    let mut guard = players.lock().unwrap();
-                                    guard.get_mut(name).map(|p| p.combat = "in combat".to_string())
-                                };
-                                let stream_clone = stream.try_clone().expect("clone failed");
-                                let read_buf = BufReader::new(stream_clone);
-                                for line in read_buf.lines() {
-                                    let line = line.expect("erreur reading ligne");
-                                    let mut args = line.splitn(2, ' ');
-                                    match args.next() {
-                                        Some("ATTACK") => {
-                                            let pv = {
-                                                let mut guard = players.lock().unwrap();
-                                                guard.get_mut(name).map(|p| p.pv.clone())
-                                            };
-                                            let hp = {
-                                                let mut guard = players.lock().unwrap();
-                                                guard.get_mut(name).map(|p| p.hp.clone())
-                                            };
-                                            let npc_info = {
-                                                let w = world.lock().unwrap();
-                                                w.npcs.get(&npc_id).map(|n| (n.stats.hp, n.stats.damage, n.hostile))
-                                            };
-                                            let (_npc_hp, _npc_damage, npc_hostile) = npc_info.unwrap();
-                                            if _npc_hp < 1 {
-                                                let msg = format!("ERR 404 NPC_NOT_FOUND\n");
-                                                stream.write_all(msg.as_bytes()).expect("ERROR");
-                                                let mut w = world.lock().unwrap();
-                                                if let Some(n) = w.npcs.get_mut(&npc_id) {
-                                                    n.engaged_by = None;
-                                                }
-                                                return;
-                                            }
-                                            let npc_info = {
-                                                let mut w = world.lock().unwrap();
-                                                if let Some(n) = w.npcs.get_mut(&npc_id) {
-                                                    n.stats.hp = n.stats.hp.saturating_sub(pv.unwrap_or(0));
-                                                    Some((n.stats.hp, n.stats.damage, n.hostile))
-                                                } else {
-                                                    None
-                                                }
-                                            };
-                                            let (npc_hp, npc_damage, _npc_hostile) = npc_info.unwrap();
-                                            if npc_hp < 1 {
-                                                let _won = {
-                                                    let mut guard = players.lock().unwrap();
-                                                    guard.get_mut(name).map(|p| p.combat = "won".to_string())
-                                                };
-                                                let combat_status = {
-                                                    let mut guard = players.lock().unwrap();
-                                                    guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
-                                                };
-                                                let msg = format!(
-                                                    "OK {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: {}, status: {}}}\n",
-                                                    hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), npc_damage.unwrap_or(0), combat_status
-                                                );
-                                                stream.write_all(msg.as_bytes()).expect("ERROR");
-                                                let msg_won = format!("OK you won the fight\n");
-                                                stream.write_all(msg_won.as_bytes()).expect("ERROR");
-                                                {
-                                                    let mut w = world.lock().unwrap();
-                                                    if let Some(location) = w.world.locations.get_mut(&room) {
-                                                        location.npcs.retain(|id| id != &npc_id);
-                                                    }
-                                                    if let Some(n) = w.npcs.get_mut(&npc_id) {
-                                                        n.engaged_by = None;
-                                                    }
-                                                }
-                                                let world_clone = Arc::clone(world);
-                                                let npc_id_clone = npc_id.clone();
-                                                let room_clone = room.clone();
-                                                thread::spawn(move || {
-                                                    thread::sleep(Duration::from_secs(30));
-                                                    let mut w = world_clone.lock().unwrap();
-                                                    if let Some(n) = w.npcs.get_mut(&npc_id_clone) {
-                                                        n.stats.hp = n.stats.max_hp;
-                                                        n.engaged_by = None;
-                                                    }
-                                                    if let Some(location) = w.world.locations.get_mut(&room_clone) {
-                                                        if !location.npcs.contains(&npc_id_clone) {
-                                                            location.npcs.push(npc_id_clone.clone());
-                                                        }
-                                                    }
-                                                });
-                                                break;
-                                            } else if npc_hostile {
-                                                let combat_status = {
-                                                    let mut guard = players.lock().unwrap();
-                                                    guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
-                                                };
-                                                let msg = format!(
-                                                    "OK {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: {}, status: {}}}\n",
-                                                    hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), npc_damage.unwrap_or(0), combat_status
-                                                );
-                                                stream.write_all(msg.as_bytes()).expect("ERROR");
-                                                let hp = {
-                                                    let mut guard = players.lock().unwrap();
-                                                    if let Some(p) = guard.get_mut(name) {
-                                                        p.hp = p.hp.saturating_sub(npc_damage.unwrap_or(0));
-                                                        Some(p.hp)
-                                                    } else {
-                                                        None
-                                                    }
-                                                };
-                                                let msg_repost = format!(
-                                                    "repost {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: {}, status: {}}}\n",
-                                                    hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), npc_damage.unwrap_or(0), combat_status
-                                                );
-                                                stream.write_all(msg_repost.as_bytes()).expect("ERROR");
-                                                if hp.unwrap_or(0) < 1 {
-                                                    let respawn_room = {
-                                                        let w = world.lock().unwrap();
-                                                        w.world.respawn_location.clone()
-                                                    };
-                                                    {
-                                                        let mut w = world.lock().unwrap();
-                                                        if let Some(n) = w.npcs.get_mut(&npc_id) {
-                                                            n.engaged_by = None;
-                                                        }
-                                                    }
-                                                    {
-                                                        let mut guard = players.lock().unwrap();
-                                                        if let Some(p) = guard.get_mut(name) {
-                                                            p.hp = 50;
-                                                            p.combat = "not in combat".to_string();
-                                                            p.room = respawn_room.clone();
-                                                        }
-                                                    }
-                                                    let msg_death = format!("OK you died, respawned in {} with 50 hp\n", respawn_room);
-                                                    stream.write_all(msg_death.as_bytes()).expect("ERROR");
-                                                    break;
-                                                }
-                                            } else {
-                                                let combat_status = {
-                                                    let mut guard = players.lock().unwrap();
-                                                    guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
-                                                };
-                                                let msg = format!(
-                                                    "OK {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: 0, status: {}}}\n",
-                                                    hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), combat_status
-                                                );
-                                                stream.write_all(msg.as_bytes()).expect("ERROR");
-                                            }
-                                        }
-                                        Some("DEFEND") => {
-                                            let msg = format!("YOU CHOICE DEFEND\n");
-                                            stream.write_all(msg.as_bytes()).expect("ERROR");
-                                            let pv = {
-                                                let mut guard = players.lock().unwrap();
-                                                guard.get_mut(name).map(|p| p.pv.clone())
-                                            };
-                                            let npc_info = {
-                                                let w = world.lock().unwrap();
-                                                w.npcs.get(&npc_id).map(|n| (n.stats.hp, n.stats.damage, n.hostile))
-                                            };
-                                            let (npc_hp, npc_damage, _npc_hostile) = npc_info.unwrap();
-                                            let hp = {
-                                                let mut guard = players.lock().unwrap();
-                                                if let Some(p) = guard.get_mut(name) {
-                                                    p.hp = p.hp.saturating_sub(npc_damage.unwrap_or(0) / 2);
-                                                    Some(p.hp)
-                                                } else {
-                                                    None
-                                                }
-                                            };
-                                            let combat_status = {
-                                                let mut guard = players.lock().unwrap();
-                                                guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
-                                            };
-                                            let msg_repost = format!(
-                                                "repost {{attacker_hp: {}, target_hp: {}, damage_dealt: {}, damage_taken: {}, status: {}}}\n",
-                                                hp.unwrap_or(0), npc_hp, pv.unwrap_or(0), npc_damage.unwrap_or(0) / 2, combat_status
-                                            );
-                                            stream.write_all(msg_repost.as_bytes()).expect("ERROR");
-                                            if hp.unwrap_or(0) < 1 {
-                                                let respawn_room = {
-                                                    let w = world.lock().unwrap();
-                                                    w.world.respawn_location.clone()
-                                                };
-                                                {
-                                                    let mut w = world.lock().unwrap();
-                                                    if let Some(n) = w.npcs.get_mut(&npc_id) {
-                                                        n.engaged_by = None;
-                                                    }
-                                                }
-                                                {
-                                                    let mut guard = players.lock().unwrap();
-                                                    if let Some(p) = guard.get_mut(name) {
-                                                        p.hp = 50;
-                                                        p.combat = "not in combat".to_string();
-                                                        p.room = respawn_room.clone();
-                                                    }
-                                                }
-                                                let msg_death = format!("OK you died, respawned in {} with 50 hp\n", respawn_room);
-                                                stream.write_all(msg_death.as_bytes()).expect("ERROR");
-                                                break;
-                                            }
-                                        }
-                                        Some("FLEE") => {
-                                            {
-                                                let mut w = world.lock().unwrap();
-                                                if let Some(n) = w.npcs.get_mut(&npc_id) {
-                                                    n.engaged_by = None;
-                                                }
-                                            }
-                                            let _out_combat = {
-                                                let mut guard = players.lock().unwrap();
-                                                guard.get_mut(name).map(|p| p.combat = "flee".to_string())
-                                            };
-                                            let msg = format!("you flee the combat\n");
-                                            stream.write(msg.as_bytes()).expect("ERROR");
-                                            break;
-                                        }
-                                        Some("STATUS") => {
-                                            let in_combat = {
-                                                let mut guard = players.lock().unwrap();
-                                                guard.get_mut(name).map(|p| p.hp)
-                                            };
-                                            let combat_status = {
-                                                let mut guard = players.lock().unwrap();
-                                                guard.get_mut(name).map(|p| p.combat.clone()).unwrap_or("unknown".to_string())
-                                            };
-                                            let msg = format!("OK {{hp={:?},max_hp: 100 ,status : {}}}\n", in_combat.unwrap_or(0), combat_status);
-                                            stream.write_all(msg.as_bytes()).expect("ERROR PRINT TATUS");
-                                        }
-                                        Some(cmd_inconnue) => {
-                                            stream.write_all(b"ERROR COMMANDE YOU CAN ATTACK DEFEND FLEEE STATUS\n").expect("Failder to write reponse");
-                                            println!("COMMANDE ERROR: {}", cmd_inconnue);
-                                        }
-                                        None => {
-                                            stream.write_all(b"ERROR COMMANDE YOU CAN ATTACK DEFEND FLEEE STATUS\n").expect("Failder to write reponse");
-                                            println!("COMMANDE ERROR");
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        else {
-                            let msg = format!("ERR 404 NPC_NOT_FOUND\n");
-                            stream.write_all(msg.as_bytes()).expect("ERROR");
-                            return ;
-                        }
-                        }
-                    println!("USER USE LOOK");
+            let guard = players.lock().unwrap();
+            let w = world.lock().unwrap();
+            if let Some(player) = guard.get(name) {
+                let mut list = Vec::new();
+                for qid in &player.quest_to_do {
+                    let total = w.quests.get(qid).and_then(|q| q.objective.count).unwrap_or(1);
+                    let current = player.quest_progress.get(qid).copied().unwrap_or(0);
+                    list.push(json!({
+                        "quest_id": qid,
+                        "status": "in_progress",
+                        "progress": format!("{}/{}", current, total),
+                    }));
                 }
-        Some(cmd_inconnue) => {
-            stream.write_all(b"ERROR COMMANDE\n").expect("Failder to write reponse");
-            println!("COMMANDE ERROR: {}", cmd_inconnue);
+                for qid in &player.quest_dine {
+                    list.push(json!({
+                        "quest_id": qid,
+                        "status": "completed",
+                        "progress": "done",
+                    }));
+                }
+                let msg = format!("OK {}\n", serde_json::to_string(&list).unwrap());
+                let _ = stream.write_all(msg.as_bytes());
+            }
         }
-        _none => {
-            stream.write_all(b"ERROR COMMANDE\n").expect("Failder to write reponse");
-            println!("COMMANDE ERROR");
+        Some("ATTACK") => {
+            let already_fighting = {
+                let guard = players.lock().unwrap();
+                guard.get(name).map(|p| p.combat == "in_combat").unwrap_or(false)
+            };
+            if !already_fighting {
+                let Some(rest) = args.next() else {
+                    send_err(stream, "400 MALFORMED_COMMAND");
+                    return;
+                };
+                let npc_arg = rest.trim();
+                let room = {
+                    let guard = players.lock().unwrap();
+                    guard.get(name).map(|p| p.room.clone())
+                };
+                let Some(room) = room else { return; };
+
+                let npc_id = {
+                    let w = world.lock().unwrap();
+                    find_npc_in_room(&w, &room, npc_arg)
+                };
+                let Some(npc_id) = npc_id else {
+                    send_err(stream, "404 NPC_NOT_FOUND");
+                    return;
+                };
+                let hostile = {
+                    let w = world.lock().unwrap();
+                    w.npcs.get(&npc_id).map(|n| n.hostile).unwrap_or(false)
+                };
+                if !hostile {
+                    send_err(stream, "405 NPC_NOT_HOSTILE");
+                    return;
+                }
+                let engaged = {
+                    let mut w = world.lock().unwrap();
+                    match w.npcs.get_mut(&npc_id) {
+                        Some(n) if n.engaged_by.is_none() => {
+                            n.engaged_by = Some(name.to_string());
+                            true
+                        }
+                        _ => false,
+                    }
+                };
+                if !engaged {
+                    send_err(stream, "406 NPC_BUSY");
+                    return;
+                }
+                let (npc_hp, player_hp) = {
+                    let mut guard = players.lock().unwrap();
+                    let w = world.lock().unwrap();
+                    if let Some(p) = guard.get_mut(name) {
+                        p.combat = "in_combat".to_string();
+                        p.target_npc = Some(npc_id.clone());
+                    }
+                    let npc_hp = w.npcs.get(&npc_id).map(|n| n.stats.hp).unwrap_or(0);
+                    let player_hp = guard.get(name).map(|p| p.hp).unwrap_or(0);
+                    (npc_hp, player_hp)
+                };
+                let reply = CombatReply {
+                    action: "engage".to_string(),
+                    attacker_hp: player_hp,
+                    target_hp: npc_hp,
+                    damage_dealt: 0,
+                    damage_taken: 0,
+                    status: "in_combat".to_string(),
+                    message: Some(format!("combat started with {}", npc_id)),
+                };
+                let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
+                let _ = stream.write_all(msg.as_bytes());
+                log("INFO", "combat_started", json!({"player": name, "npc": npc_id}));
+                return;
+            }
+            let npc_id = {
+                let guard = players.lock().unwrap();
+                guard.get(name).and_then(|p| p.target_npc.clone())
+            };
+            let Some(npc_id) = npc_id else {
+                let mut guard = players.lock().unwrap();
+                if let Some(p) = guard.get_mut(name) {
+                    p.combat = "healthy".to_string();
+                }
+                send_err(stream, "407 NOT_IN_COMBAT");
+                return;
+            };
+
+            let pv = {
+                let guard = players.lock().unwrap();
+                guard.get(name).map(|p| p.pv).unwrap_or(0)
+            };
+
+            let npc_already_dead = {
+                let w = world.lock().unwrap();
+                w.npcs.get(&npc_id).map(|n| n.stats.hp < 1).unwrap_or(true)
+            };
+            if npc_already_dead {
+                {
+                    let mut w = world.lock().unwrap();
+                    if let Some(n) = w.npcs.get_mut(&npc_id) {
+                        n.engaged_by = None;
+                    }
+                }
+                {
+                    let mut guard = players.lock().unwrap();
+                    if let Some(p) = guard.get_mut(name) {
+                        p.combat = "healthy".to_string();
+                        p.target_npc = None;
+                    }
+                }
+                send_err(stream, "404 NPC_NOT_FOUND");
+                return;
+            }
+            let (npc_hp, npc_damage) = {
+                let mut w = world.lock().unwrap();
+                if let Some(n) = w.npcs.get_mut(&npc_id) {
+                    n.stats.hp = n.stats.hp.saturating_sub(pv);
+                    (n.stats.hp, n.stats.damage.unwrap_or(0))
+                } else {
+                    (0, 0)
+                }
+            };
+            if npc_hp < 1 {
+                let room = {
+                    let guard = players.lock().unwrap();
+                    guard.get(name).map(|p| p.room.clone()).unwrap_or_default()
+                };
+                let player_hp = {
+                    let mut guard = players.lock().unwrap();
+                    if let Some(p) = guard.get_mut(name) {
+                        p.combat = "healthy".to_string();
+                        p.target_npc = None;
+                        p.hp
+                    } else {
+                        0
+                    }
+                };
+                {
+                    let mut w = world.lock().unwrap();
+                    if let Some(location) = w.world.locations.get_mut(&room) {
+                        location.npcs.retain(|id| id != &npc_id);
+                    }
+                    if let Some(n) = w.npcs.get_mut(&npc_id) {
+                        n.engaged_by = None;
+                    }
+                }
+                {
+                    let mut guard = players.lock().unwrap();
+                    let w = world.lock().unwrap();
+                    if let Some(p) = guard.get_mut(name) {
+                        apply_kill_quest_progress(p, &w, &npc_id);
+                    }
+                }
+                let world_clone = Arc::clone(world);
+                let npc_id_clone = npc_id.clone();
+                let room_clone = room.clone();
+                thread::spawn(move || {
+                    thread::sleep(Duration::from_secs(30));
+                    let mut w = world_clone.lock().unwrap();
+                    if let Some(n) = w.npcs.get_mut(&npc_id_clone) {
+                        n.stats.hp = n.stats.max_hp;
+                        n.engaged_by = None;
+                    }
+                    if let Some(location) = w.world.locations.get_mut(&room_clone) {
+                        if !location.npcs.contains(&npc_id_clone) {
+                            location.npcs.push(npc_id_clone.clone());
+                        }
+                    }
+                });
+                let reply = CombatReply {
+                    action: "attack".to_string(),
+                    attacker_hp: player_hp,
+                    target_hp: 0,
+                    damage_dealt: pv,
+                    damage_taken: 0,
+                    status: "won".to_string(),
+                    message: Some("you won the fight".to_string()),
+                };
+                let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
+                let _ = stream.write_all(msg.as_bytes());
+                log("INFO", "combat_won", json!({"player": name, "npc": npc_id}));
+                return;
+            }
+            let player_hp = {
+                let mut guard = players.lock().unwrap();
+                if let Some(p) = guard.get_mut(name) {
+                    p.hp = p.hp.saturating_sub(npc_damage);
+                    p.hp
+                } else {
+                    0
+                }
+            };
+            if player_hp < 1 {
+                let respawn_room = {
+                    let w = world.lock().unwrap();
+                    w.world.respawn_location.clone()
+                };
+                {
+                    let mut w = world.lock().unwrap();
+                    if let Some(n) = w.npcs.get_mut(&npc_id) {
+                        n.engaged_by = None;
+                    }
+                }
+                {
+                    let mut guard = players.lock().unwrap();
+                    if let Some(p) = guard.get_mut(name) {
+                        p.hp = 50;
+                        p.combat = "healthy".to_string();
+                        p.target_npc = None;
+                        p.room = respawn_room.clone();
+                    }
+                }
+                let reply = CombatReply {
+                    action: "attack".to_string(),
+                    attacker_hp: 0,
+                    target_hp: npc_hp,
+                    damage_dealt: pv,
+                    damage_taken: npc_damage,
+                    status: "dead".to_string(),
+                    message: Some(format!("you died, respawned in {} with 50 hp", respawn_room)),
+                };
+                let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
+                let _ = stream.write_all(msg.as_bytes());
+                log("INFO", "player_died", json!({"player": name, "npc": npc_id}));
+                return;
+            }
+            let reply = CombatReply {
+                action: "attack".to_string(),
+                attacker_hp: player_hp,
+                target_hp: npc_hp,
+                damage_dealt: pv,
+                damage_taken: npc_damage,
+                status: "in_combat".to_string(),
+                message: None,
+            };
+            let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
+            let _ = stream.write_all(msg.as_bytes());
+            log("INFO", "combat_round", json!({"player": name, "npc": npc_id}));
+        }
+        Some("DEFEND") => {
+            let npc_id = {
+                let guard = players.lock().unwrap();
+                guard.get(name).and_then(|p| if p.combat == "in_combat" { p.target_npc.clone() } else { None })
+            };
+            let Some(npc_id) = npc_id else {
+                send_err(stream, "407 NOT_IN_COMBAT");
+                return;
+            };
+
+            let npc_damage = {
+                let w = world.lock().unwrap();
+                w.npcs.get(&npc_id).and_then(|n| n.stats.damage).unwrap_or(0)
+            };
+            let reduced = npc_damage / 2;
+            let player_hp = {
+                let mut guard = players.lock().unwrap();
+                if let Some(p) = guard.get_mut(name) {
+                    p.hp = p.hp.saturating_sub(reduced);
+                    p.hp
+                } else {
+                    0
+                }
+            };
+            let npc_hp = {
+                let w = world.lock().unwrap();
+                w.npcs.get(&npc_id).map(|n| n.stats.hp).unwrap_or(0)
+            };
+            if player_hp < 1 {
+                let respawn_room = {
+                    let w = world.lock().unwrap();
+                    w.world.respawn_location.clone()
+                };
+                {
+                    let mut w = world.lock().unwrap();
+                    if let Some(n) = w.npcs.get_mut(&npc_id) {
+                        n.engaged_by = None;
+                    }
+                }
+                {
+                    let mut guard = players.lock().unwrap();
+                    if let Some(p) = guard.get_mut(name) {
+                        p.hp = 50;
+                        p.combat = "healthy".to_string();
+                        p.target_npc = None;
+                        p.room = respawn_room.clone();
+                    }
+                }
+                let reply = CombatReply {
+                    action: "defend".to_string(),
+                    attacker_hp: 0,
+                    target_hp: npc_hp,
+                    damage_dealt: 0,
+                    damage_taken: reduced,
+                    status: "dead".to_string(),
+                    message: Some(format!("you died, respawned in {} with 50 hp", respawn_room)),
+                };
+                let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
+                let _ = stream.write_all(msg.as_bytes());
+                log("INFO", "player_died", json!({"player": name, "npc": npc_id}));
+                return;
+            }
+            let reply = CombatReply {
+                action: "defend".to_string(),
+                attacker_hp: player_hp,
+                target_hp: npc_hp,
+                damage_dealt: 0,
+                damage_taken: reduced,
+                status: "in_combat".to_string(),
+                message: None,
+            };
+            let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
+            let _ = stream.write_all(msg.as_bytes());
+            log("INFO", "combat_defend", json!({"player": name, "npc": npc_id}));
+        }
+        Some("FLEE") => {
+            let npc_id = {
+                let guard = players.lock().unwrap();
+                guard.get(name).and_then(|p| if p.combat == "in_combat" { p.target_npc.clone() } else { None })
+            };
+            let Some(npc_id) = npc_id else {
+                send_err(stream, "407 NOT_IN_COMBAT");
+                return;
+            };
+            {
+                let mut w = world.lock().unwrap();
+                if let Some(n) = w.npcs.get_mut(&npc_id) {
+                    n.engaged_by = None;
+                }
+            }
+            let player_hp = {
+                let mut guard = players.lock().unwrap();
+                if let Some(p) = guard.get_mut(name) {
+                    p.combat = "healthy".to_string();
+                    p.target_npc = None;
+                    p.hp
+                } else {
+                    0
+                }
+            };
+            let reply = CombatReply {
+                action: "flee".to_string(),
+                attacker_hp: player_hp,
+                target_hp: 0,
+                damage_dealt: 0,
+                damage_taken: 0,
+                status: "fled".to_string(),
+                message: Some("you fled the combat".to_string()),
+            };
+            let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
+            let _ = stream.write_all(msg.as_bytes());
+            log("INFO", "combat_flee", json!({"player": name, "npc": npc_id}));
+        }
+        Some(cmd_inconnue) => {
+            send_err(stream, "400 MALFORMED_COMMAND");
+            log("WARN", "unknown_command", json!({"player": name, "command": cmd_inconnue}));
+        }
+        None => {
+            send_err(stream, "400 MALFORMED_COMMAND");
         }
     }
 }
