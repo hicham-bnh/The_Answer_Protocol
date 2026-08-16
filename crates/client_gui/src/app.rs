@@ -118,6 +118,8 @@ impl TapClient {
         egui::CentralPanel::default().show(ui, |ui| {
             ui.add_space(40.0);
             ui.heading(egui::RichText::new("TAP").size(28.0));
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new(format!("Server: {}", self.server_address)).size(18.0));
             ui.add_space(16.0);
             ui.label("Username:");
             ui.text_edit_singleline(&mut self.username);
@@ -525,7 +527,7 @@ impl TapClient {
                     .logs
                     .push(format!("Unsolicited ERR: {code} {description}")),
             },
-            ServerMsg::Unknown(data) => self.logs.push(data.to_string()),
+            ServerMsg::Unknown(data) => self.logs.push(format!("(unparsed) {data}")),
         }
     }
 }
@@ -533,9 +535,8 @@ impl TapClient {
 impl eframe::App for TapClient {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         while let Ok(line) = self.rx.try_recv() {
-            let msg = crate::protocol::parse_line(&line);
-            self.logs.push(format!("{msg:?}"));
-            self.apply(msg);
+            self.logs.push(format!("<< {line}"));
+            self.apply(crate::protocol::parse_line(&line));
         }
 
         if self.connected {
