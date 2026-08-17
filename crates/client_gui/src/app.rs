@@ -18,6 +18,7 @@ pub struct TapClient {
     hp: u32,
     max_hp: u32,
     group: Option<String>,
+    group_invite: Option<String>,
     in_combat: bool,
     combat_target: Option<String>,
     combat_target_hp: u32,
@@ -50,6 +51,7 @@ impl TapClient {
             hp: 100,
             max_hp: 100,
             group: None,
+            group_invite: None,
             in_combat: false,
             combat_target: None,
             combat_target_hp: 0,
@@ -131,6 +133,14 @@ impl TapClient {
                     if ui.button("Leave").clicked() {
                         pending = Some("GROUP LEAVE".to_string());
                     }
+                } else if let Some(leader) = self.group_invite.clone() {
+                    ui.label(format!("{leader} invited you to their group"));
+                    if ui.button("Join").clicked() {
+                        pending = Some(format!("GROUP JOIN {leader}"));
+                    }
+                    if ui.button("Dismiss").clicked() {
+                        self.group_invite = None;
+                    }
                 } else {
                     ui.label("No group");
                     if ui.button("Create").clicked() {
@@ -163,7 +173,36 @@ impl TapClient {
         egui::Panel::left("room_panel")
             .default_size(300.0)
             .show(ui, |ui| {
-                if let Some(room) = &self.room {
+                if self.in_combat {
+                    ui.label(egui::RichText::new("COMBAT").size(22.0));
+                    ui.add_space(8.0);
+                    let target = self.combat_target.as_deref().unwrap_or("Unknown");
+                    ui.label(egui::RichText::new(prettify(target)).size(18.0));
+                    ui.label(format!(
+                        "Enemy HP: {}/{}",
+                        self.combat_target_hp, self.combat_target_max_hp
+                    ));
+                    ui.separator();
+                    egui::ScrollArea::vertical()
+                        .stick_to_bottom(true)
+                        .max_height(350.0)
+                        .show(ui, |ui| {
+                            for line in &self.combat_history {
+                                ui.label(line);
+                            }
+                        });
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        for action in ["ATTACK", "DEFEND", "FLEE"] {
+                            if ui
+                                .button(egui::RichText::new(action).size(18.0))
+                                .clicked()
+                            {
+                                pending = Some(action.to_string());
+                            }
+                        }
+                    });
+                } else if let Some(room) = &self.room {
                     ui.label(egui::RichText::new(&room.name).size(20.0));
                     ui.label(format!("{} player(s) in this room", self.players.len()));
                     ui.add_space(8.0);
@@ -238,7 +277,10 @@ impl TapClient {
                 for item in &self.inventory {
                     ui.horizontal(|ui| {
                         ui.label(prettify(item));
-                        if ui.button("Drop").clicked() {
+                        if ui
+                            .add_enabled(!self.in_combat, egui::Button::new("Drop"))
+                            .clicked()
+                        {
                             pending = Some(format!("DROP {item}"));
                         }
                     });
@@ -316,9 +358,8 @@ impl TapClient {
                     ChatTab::Group => self.chat_group.push(format!("{}: {}", username, message)),
                 },
                 EvtType::GroupInvite(leader) => {
-                    self.logs.push(format!(
-                        "Group invite from {leader} (GROUP JOIN {leader} to accept)"
-                    ));
+                    self.logs.push(format!("Group invite from {leader}"));
+                    self.group_invite = Some(leader);
                 }
                 EvtType::GroupJoin(username) => {
                     self.chat_group
@@ -409,7 +450,8 @@ impl TapClient {
                                         data_splitter.next(),
                                     ) {
                                         (Some("group"), Some(group_name), None) => {
-                                            self.group = Some(group_name.to_string())
+                                            self.group = Some(group_name.to_string());
+                                            self.group_invite = None
                                         }
                                         _ => self
                                             .logs
