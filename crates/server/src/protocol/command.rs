@@ -1,11 +1,11 @@
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
-use std::net::TcpStream;
-use std::io::Write;
+use crate::world_struct::world_struct::GameWorld;
 use crate::Player;
+use std::collections::HashMap;
+use std::io::Write;
+use std::net::TcpStream;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use crate::world_struct::world_struct::GameWorld;
 
 use serde::Serialize;
 use serde_json::json;
@@ -64,7 +64,6 @@ struct QuestReply {
     progress: String,
 }
 
-
 fn send_err(stream: &mut TcpStream, code: &str) {
     let _ = stream.write_all(format!("ERR {}\n", code).as_bytes());
 }
@@ -83,7 +82,12 @@ pub fn log(level: &str, event: &str, details: serde_json::Value) {
     println!("{}", entry);
 }
 
-fn broadcast_room(guard: &mut HashMap<String, Player>, room: &str, msg: &str, exclude: Option<&str>) {
+fn broadcast_room(
+    guard: &mut HashMap<String, Player>,
+    room: &str,
+    msg: &str,
+    exclude: Option<&str>,
+) {
     for (client_name, client) in guard.iter_mut() {
         if client.room == room && Some(client_name.as_str()) != exclude {
             let _ = client.stream.lock().unwrap().write_all(msg.as_bytes());
@@ -103,7 +107,13 @@ fn find_npc_in_room(w: &GameWorld, room: &str, npc_arg: &str) -> Option<String> 
     let loc = w.world.locations.get(room)?;
     loc.npcs
         .iter()
-        .find(|id| id.as_str() == npc_arg || w.npcs.get(id.as_str()).map(|n| n.name.eq_ignore_ascii_case(npc_arg)).unwrap_or(false))
+        .find(|id| {
+            id.as_str() == npc_arg
+                || w.npcs
+                    .get(id.as_str())
+                    .map(|n| n.name.eq_ignore_ascii_case(npc_arg))
+                    .unwrap_or(false)
+        })
         .cloned()
 }
 
@@ -192,7 +202,11 @@ pub fn connect_user(
             let stats_evt = format!("EVT STATS players={}\n", guard.len());
             broadcast_all(&mut guard, &stats_evt, None);
 
-            log("INFO", "player_connected", json!({"player": name, "room": spawn_room}));
+            log(
+                "INFO",
+                "player_connected",
+                json!({"player": name, "room": spawn_room}),
+            );
             (true, name)
         }
         Some("QUIT") => {
@@ -202,7 +216,11 @@ pub fn connect_user(
         }
         Some(cmd_inconnue) => {
             send_err(stream, "100 NOT_CONNECTED");
-            log("WARN", "command_before_connect", json!({"command": cmd_inconnue}));
+            log(
+                "WARN",
+                "command_before_connect",
+                json!({"command": cmd_inconnue}),
+            );
             (false, String::new())
         }
         None => {
@@ -224,7 +242,11 @@ pub fn leave_group(name: &str, players: &Arc<Mutex<HashMap<String, Player>>>) {
     let msg_evt = format!("EVT GROUP LEAVE {}\n", name);
     for (client_name, client_stream) in guard.iter_mut() {
         if client_name != name && client_stream.group.as_deref() == Some(my_group.as_str()) {
-            let _ = client_stream.stream.lock().unwrap().write_all(msg_evt.as_bytes());
+            let _ = client_stream
+                .stream
+                .lock()
+                .unwrap()
+                .write_all(msg_evt.as_bytes());
         }
     }
 }
@@ -265,12 +287,19 @@ pub fn parse_command(
     if let Some(cmd_name) = cmd {
         let in_combat = {
             let guard = players.lock().unwrap();
-            guard.get(name).map(|p| p.combat == "in_combat").unwrap_or(false)
+            guard
+                .get(name)
+                .map(|p| p.combat == "in_combat")
+                .unwrap_or(false)
         };
         let allowed = matches!(cmd_name, "ATTACK" | "DEFEND" | "FLEE" | "STATUS" | "CHAT");
         if in_combat && !allowed {
             send_err(stream, "409 IN_COMBAT");
-            log("WARN", "command_rejected_in_combat", json!({"player": name, "command": cmd_name}));
+            log(
+                "WARN",
+                "command_rejected_in_combat",
+                json!({"player": name, "command": cmd_name}),
+            );
             return;
         }
     }
@@ -335,12 +364,24 @@ pub fn parse_command(
                     let enter_evt = format!("EVT ROOM PRESENCE ENTER {}\n", name);
                     for (_client_name, client_steam) in guard.iter_mut() {
                         if client_steam.room == room_str {
-                            let _ = client_steam.stream.lock().unwrap().write_all(leave_evt.as_bytes());
+                            let _ = client_steam
+                                .stream
+                                .lock()
+                                .unwrap()
+                                .write_all(leave_evt.as_bytes());
                         } else if client_steam.room == room_to {
-                            let _ = client_steam.stream.lock().unwrap().write_all(enter_evt.as_bytes());
+                            let _ = client_steam
+                                .stream
+                                .lock()
+                                .unwrap()
+                                .write_all(enter_evt.as_bytes());
                         }
                     }
-                    log("INFO", "player_moved", json!({"player": name, "from": room_str, "to": room_to}));
+                    log(
+                        "INFO",
+                        "player_moved",
+                        json!({"player": name, "from": room_str, "to": room_to}),
+                    );
                 } else {
                     send_err(stream, "301 NO_EXIT");
                 }
@@ -374,7 +415,11 @@ pub fn parse_command(
                         let evt = format!("EVT GROUP CHAT {} {}\n", name, chat_msg);
                         for (_client_name, client_steam) in guard.iter_mut() {
                             if client_steam.group.as_deref() == Some(my_group.as_str()) {
-                                let _ = client_steam.stream.lock().unwrap().write_all(evt.as_bytes());
+                                let _ = client_steam
+                                    .stream
+                                    .lock()
+                                    .unwrap()
+                                    .write_all(evt.as_bytes());
                             }
                         }
                     }
@@ -400,7 +445,10 @@ pub fn parse_command(
                 .map(|(n, _)| n.clone())
                 .collect();
             let server = guard.len() as u32;
-            let reply = WhoReply { room: room_players, server };
+            let reply = WhoReply {
+                room: room_players,
+                server,
+            };
             let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
             let _ = stream.write_all(msg.as_bytes());
             log("INFO", "who", json!({"player": name}));
@@ -483,7 +531,10 @@ pub fn parse_command(
                         }
                         let invited = {
                             let guard = players.lock().unwrap();
-                            guard.get(name).map(|p| p.invite_from.as_deref() == Some(leader)).unwrap_or(false)
+                            guard
+                                .get(name)
+                                .map(|p| p.invite_from.as_deref() == Some(leader))
+                                .unwrap_or(false)
                         };
                         if !invited {
                             send_err(stream, "403 NOT_INVITED");
@@ -513,8 +564,14 @@ pub fn parse_command(
                             let mut guard = players.lock().unwrap();
                             let msg_evt = format!("EVT GROUP JOIN {}\n", name);
                             for (client_name, client_stream) in guard.iter_mut() {
-                                if client_name != name && client_stream.group.as_deref() == Some(leader_group.as_str()) {
-                                    let _ = client_stream.stream.lock().unwrap().write_all(msg_evt.as_bytes());
+                                if client_name != name
+                                    && client_stream.group.as_deref() == Some(leader_group.as_str())
+                                {
+                                    let _ = client_stream
+                                        .stream
+                                        .lock()
+                                        .unwrap()
+                                        .write_all(msg_evt.as_bytes());
                                 }
                             }
                         }
@@ -559,7 +616,8 @@ pub fn parse_command(
                 let target_id: Option<String> = if w.items.contains_key(input) {
                     Some(input.to_string())
                 } else {
-                    w.items.iter()
+                    w.items
+                        .iter()
                         .find(|(_id, item)| item.name.eq_ignore_ascii_case(input))
                         .map(|(id, _item)| id.clone())
                 };
@@ -570,7 +628,10 @@ pub fn parse_command(
                 };
 
                 // 2. Vérification de la présence dans la pièce d'abord
-                let in_room = w.world.locations.get(&room_player)
+                let in_room = w
+                    .world
+                    .locations
+                    .get(&room_player)
                     .map(|loc| loc.items.contains(&item_id))
                     .unwrap_or(false);
 
@@ -594,7 +655,11 @@ pub fn parse_command(
                         apply_take_quest_progress(player, &w, &item_id);
                         let msg = format!("OK taken={}\n", item_id);
                         let _ = stream.write_all(msg.as_bytes());
-                        log("INFO", "item_taken", json!({"player": name, "item": item_id}));
+                        log(
+                            "INFO",
+                            "item_taken",
+                            json!({"player": name, "item": item_id}),
+                        );
                     } else {
                         send_err(stream, "404 ITEM_NOT_FOUND");
                     }
@@ -621,7 +686,11 @@ pub fn parse_command(
 
                 // Chercher l'item dans l'inventaire soit par ID direct, soit par nom d'affichage
                 let found_index = player.inventory.iter().position(|inv_item_id| {
-                    inv_item_id == input || w.items.get(inv_item_id).map(|i| i.name.eq_ignore_ascii_case(input)).unwrap_or(false)
+                    inv_item_id == input
+                        || w.items
+                            .get(inv_item_id)
+                            .map(|i| i.name.eq_ignore_ascii_case(input))
+                            .unwrap_or(false)
                 });
 
                 if let Some(index) = found_index {
@@ -630,7 +699,11 @@ pub fn parse_command(
                         location.items.push(item_id.clone());
                         let msg = format!("OK dropped={}\n", item_id);
                         let _ = stream.write_all(msg.as_bytes());
-                        log("INFO", "item_dropped", json!({"player": name, "item": item_id}));
+                        log(
+                            "INFO",
+                            "item_dropped",
+                            json!({"player": name, "item": item_id}),
+                        );
                     } else {
                         send_err(stream, "404 ITEM_NOT_FOUND");
                     }
@@ -658,7 +731,9 @@ pub fn parse_command(
                 let guard = players.lock().unwrap();
                 guard.get(name).map(|p| p.room.clone())
             };
-            let Some(room) = room else { return; };
+            let Some(room) = room else {
+                return;
+            };
 
             let mut w = world.lock().unwrap();
             let Some(npc_id) = find_npc_in_room(&w, &room, npc_arg) else {
@@ -677,7 +752,10 @@ pub fn parse_command(
 
             match dialogue {
                 Some(line) => {
-                    let reply = TalkReply { npc: npc_id.clone(), dialogue: line };
+                    let reply = TalkReply {
+                        npc: npc_id.clone(),
+                        dialogue: line,
+                    };
                     let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
                     let _ = stream.write_all(msg.as_bytes());
                     log("INFO", "npc_talk", json!({"player": name, "npc": npc_id}));
@@ -707,7 +785,9 @@ pub fn parse_command(
                 let guard = players.lock().unwrap();
                 guard.get(name).map(|p| p.room.clone())
             };
-            let Some(room) = room else { return; };
+            let Some(room) = room else {
+                return;
+            };
 
             let npc_id = {
                 let w = world.lock().unwrap();
@@ -720,7 +800,10 @@ pub fn parse_command(
 
             let offered: Vec<String> = {
                 let w = world.lock().unwrap();
-                w.npcs.get(&npc_id).map(|n| n.quests.clone()).unwrap_or_default()
+                w.npcs
+                    .get(&npc_id)
+                    .map(|n| n.quests.clone())
+                    .unwrap_or_default()
             };
             if offered.is_empty() {
                 send_err(stream, "406 NO_QUEST_AVAILABLE");
@@ -728,10 +811,16 @@ pub fn parse_command(
             }
             let mut guard = players.lock().unwrap();
             let w = world.lock().unwrap();
-            let Some(player) = guard.get_mut(name) else { return; };
+            let Some(player) = guard.get_mut(name) else {
+                return;
+            };
             for qid in offered.iter() {
                 if player.quest_to_do.contains(qid) {
-                    let total = w.quests.get(qid).and_then(|q| q.objective.count).unwrap_or(1);
+                    let total = w
+                        .quests
+                        .get(qid)
+                        .and_then(|q| q.objective.count)
+                        .unwrap_or(1);
                     let current = player.quest_progress.get(qid).copied().unwrap_or(0);
                     if current >= total {
                         player.quest_to_do.retain(|x| x != qid);
@@ -746,7 +835,11 @@ pub fn parse_command(
                         };
                         let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
                         let _ = stream.write_all(msg.as_bytes());
-                        log("INFO", "quest_completed", json!({"player": name, "quest": qid}));
+                        log(
+                            "INFO",
+                            "quest_completed",
+                            json!({"player": name, "quest": qid}),
+                        );
                         return;
                     } else {
                         let reply = QuestReply {
@@ -764,7 +857,11 @@ pub fn parse_command(
                 if !player.quest_dine.contains(qid) {
                     player.quest_to_do.push(qid.clone());
                     player.quest_progress.insert(qid.clone(), 0);
-                    let total = w.quests.get(qid).and_then(|q| q.objective.count).unwrap_or(1);
+                    let total = w
+                        .quests
+                        .get(qid)
+                        .and_then(|q| q.objective.count)
+                        .unwrap_or(1);
                     let reply = QuestReply {
                         quest_id: qid.clone(),
                         status: "in_progress".to_string(),
@@ -772,7 +869,11 @@ pub fn parse_command(
                     };
                     let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
                     let _ = stream.write_all(msg.as_bytes());
-                    log("INFO", "quest_accepted", json!({"player": name, "quest": qid}));
+                    log(
+                        "INFO",
+                        "quest_accepted",
+                        json!({"player": name, "quest": qid}),
+                    );
                     return;
                 }
             }
@@ -785,7 +886,11 @@ pub fn parse_command(
             if let Some(player) = guard.get(name) {
                 let mut list = Vec::new();
                 for qid in &player.quest_to_do {
-                    let total = w.quests.get(qid).and_then(|q| q.objective.count).unwrap_or(1);
+                    let total = w
+                        .quests
+                        .get(qid)
+                        .and_then(|q| q.objective.count)
+                        .unwrap_or(1);
                     let current = player.quest_progress.get(qid).copied().unwrap_or(0);
                     list.push(json!({
                         "quest_id": qid,
@@ -807,7 +912,10 @@ pub fn parse_command(
         Some("ATTACK") => {
             let already_fighting = {
                 let guard = players.lock().unwrap();
-                guard.get(name).map(|p| p.combat == "in_combat").unwrap_or(false)
+                guard
+                    .get(name)
+                    .map(|p| p.combat == "in_combat")
+                    .unwrap_or(false)
             };
             if !already_fighting {
                 let Some(rest) = args.next() else {
@@ -819,7 +927,9 @@ pub fn parse_command(
                     let guard = players.lock().unwrap();
                     guard.get(name).map(|p| p.room.clone())
                 };
-                let Some(room) = room else { return; };
+                let Some(room) = room else {
+                    return;
+                };
 
                 let npc_id = {
                     let w = world.lock().unwrap();
@@ -835,6 +945,14 @@ pub fn parse_command(
                 };
                 if !hostile {
                     send_err(stream, "405 NPC_NOT_HOSTILE");
+                    return;
+                }
+                let alive = {
+                    let w = world.lock().unwrap();
+                    w.npcs.get(&npc_id).map(|n| n.stats.hp > 0).unwrap_or(false)
+                };
+                if !alive {
+                    send_err(stream, "404 NPC_NOT_FOUND");
                     return;
                 }
                 let engaged = {
@@ -877,11 +995,18 @@ pub fn parse_command(
                 // Broadcast room de début de combat
                 {
                     let mut guard = players.lock().unwrap();
-                    let evt = format!("EVT ROOM CHAT {} * dynamic combat engaged against {}\n", name, npc_id);
+                    let evt = format!(
+                        "EVT ROOM CHAT {} * dynamic combat engaged against {}\n",
+                        name, npc_id
+                    );
                     broadcast_room(&mut guard, &room, &evt, Some(name));
                 }
 
-                log("INFO", "combat_started", json!({"player": name, "npc": npc_id}));
+                log(
+                    "INFO",
+                    "combat_started",
+                    json!({"player": name, "npc": npc_id}),
+                );
                 return;
             }
             let npc_id = {
@@ -966,8 +1091,15 @@ pub fn parse_command(
                 let world_clone = Arc::clone(world);
                 let npc_id_clone = npc_id.clone();
                 let room_clone = room.clone();
+                let respawn_delay = {
+                    let w = world.lock().unwrap();
+                    w.npcs
+                        .get(&npc_id)
+                        .and_then(|n| n.respawn_seconds)
+                        .unwrap_or(30) as u64
+                };
                 thread::spawn(move || {
-                    thread::sleep(Duration::from_secs(30));
+                    thread::sleep(Duration::from_secs(respawn_delay));
                     let mut w = world_clone.lock().unwrap();
                     if let Some(n) = w.npcs.get_mut(&npc_id_clone) {
                         n.stats.hp = n.stats.max_hp;
@@ -994,7 +1126,10 @@ pub fn parse_command(
                 // Broadcast room de victoire
                 {
                     let mut guard = players.lock().unwrap();
-                    let evt = format!("EVT ROOM CHAT {} * dynamic combat defeated {}\n", name, npc_id);
+                    let evt = format!(
+                        "EVT ROOM CHAT {} * dynamic combat defeated {}\n",
+                        name, npc_id
+                    );
                     broadcast_room(&mut guard, &room, &evt, Some(name));
                 }
 
@@ -1039,7 +1174,10 @@ pub fn parse_command(
                     damage_dealt: pv,
                     damage_taken: npc_damage,
                     status: "dead".to_string(),
-                    message: Some(format!("you died, respawned in {} with 50 hp", respawn_room)),
+                    message: Some(format!(
+                        "you died, respawned in {} with 50 hp",
+                        respawn_room
+                    )),
                 };
                 let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
                 let _ = stream.write_all(msg.as_bytes());
@@ -1047,11 +1185,18 @@ pub fn parse_command(
                 // Broadcast room de mort du joueur
                 {
                     let mut guard = players.lock().unwrap();
-                    let evt = format!("EVT ROOM CHAT {} * dynamic combat died fighting {}\n", name, npc_id);
+                    let evt = format!(
+                        "EVT ROOM CHAT {} * dynamic combat died fighting {}\n",
+                        name, npc_id
+                    );
                     broadcast_room(&mut guard, &old_room, &evt, Some(name));
                 }
 
-                log("INFO", "player_died", json!({"player": name, "npc": npc_id}));
+                log(
+                    "INFO",
+                    "player_died",
+                    json!({"player": name, "npc": npc_id}),
+                );
                 return;
             }
             let reply = CombatReply {
@@ -1065,12 +1210,22 @@ pub fn parse_command(
             };
             let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
             let _ = stream.write_all(msg.as_bytes());
-            log("INFO", "combat_round", json!({"player": name, "npc": npc_id}));
+            log(
+                "INFO",
+                "combat_round",
+                json!({"player": name, "npc": npc_id}),
+            );
         }
         Some("DEFEND") => {
             let npc_id = {
                 let guard = players.lock().unwrap();
-                guard.get(name).and_then(|p| if p.combat == "in_combat" { p.target_npc.clone() } else { None })
+                guard.get(name).and_then(|p| {
+                    if p.combat == "in_combat" {
+                        p.target_npc.clone()
+                    } else {
+                        None
+                    }
+                })
             };
             let Some(npc_id) = npc_id else {
                 send_err(stream, "407 NOT_IN_COMBAT");
@@ -1079,7 +1234,10 @@ pub fn parse_command(
 
             let npc_damage = {
                 let w = world.lock().unwrap();
-                w.npcs.get(&npc_id).and_then(|n| n.stats.damage).unwrap_or(0)
+                w.npcs
+                    .get(&npc_id)
+                    .and_then(|n| n.stats.damage)
+                    .unwrap_or(0)
             };
             let reduced = npc_damage / 2;
             let player_hp = {
@@ -1124,7 +1282,10 @@ pub fn parse_command(
                     damage_dealt: 0,
                     damage_taken: reduced,
                     status: "dead".to_string(),
-                    message: Some(format!("you died, respawned in {} with 50 hp", respawn_room)),
+                    message: Some(format!(
+                        "you died, respawned in {} with 50 hp",
+                        respawn_room
+                    )),
                 };
                 let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
                 let _ = stream.write_all(msg.as_bytes());
@@ -1132,11 +1293,18 @@ pub fn parse_command(
                 // Broadcast room de mort
                 {
                     let mut guard = players.lock().unwrap();
-                    let evt = format!("EVT ROOM CHAT {} * dynamic combat died fighting {}\n", name, npc_id);
+                    let evt = format!(
+                        "EVT ROOM CHAT {} * dynamic combat died fighting {}\n",
+                        name, npc_id
+                    );
                     broadcast_room(&mut guard, &old_room, &evt, Some(name));
                 }
 
-                log("INFO", "player_died", json!({"player": name, "npc": npc_id}));
+                log(
+                    "INFO",
+                    "player_died",
+                    json!({"player": name, "npc": npc_id}),
+                );
                 return;
             }
             let reply = CombatReply {
@@ -1150,13 +1318,23 @@ pub fn parse_command(
             };
             let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
             let _ = stream.write_all(msg.as_bytes());
-            log("INFO", "combat_defend", json!({"player": name, "npc": npc_id}));
+            log(
+                "INFO",
+                "combat_defend",
+                json!({"player": name, "npc": npc_id}),
+            );
         }
         Some("FLEE") => {
             let (npc_id, room) = {
                 let guard = players.lock().unwrap();
                 let p = guard.get(name);
-                let npc = p.and_then(|p| if p.combat == "in_combat" { p.target_npc.clone() } else { None });
+                let npc = p.and_then(|p| {
+                    if p.combat == "in_combat" {
+                        p.target_npc.clone()
+                    } else {
+                        None
+                    }
+                });
                 let room = p.map(|p| p.room.clone()).unwrap_or_default();
                 (npc, room)
             };
@@ -1195,15 +1373,26 @@ pub fn parse_command(
             // Broadcast room de fuite
             {
                 let mut guard = players.lock().unwrap();
-                let evt = format!("EVT ROOM CHAT {} * dynamic combat fled from {}\n", name, npc_id);
+                let evt = format!(
+                    "EVT ROOM CHAT {} * dynamic combat fled from {}\n",
+                    name, npc_id
+                );
                 broadcast_room(&mut guard, &room, &evt, Some(name));
             }
 
-            log("INFO", "combat_flee", json!({"player": name, "npc": npc_id}));
+            log(
+                "INFO",
+                "combat_flee",
+                json!({"player": name, "npc": npc_id}),
+            );
         }
         Some(cmd_inconnue) => {
             send_err(stream, "400 MALFORMED_COMMAND");
-            log("WARN", "unknown_command", json!({"player": name, "command": cmd_inconnue}));
+            log(
+                "WARN",
+                "unknown_command",
+                json!({"player": name, "command": cmd_inconnue}),
+            );
         }
         None => {
             send_err(stream, "400 MALFORMED_COMMAND");

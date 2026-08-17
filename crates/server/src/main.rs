@@ -34,7 +34,12 @@ use world_struct::world_struct::GameWorld;
 
 fn parse_world() -> GameWorld {
     let world = fs::read_to_string("config/world.yaml").expect("Impossible de lire world.yaml");
-    let game_world: GameWorld = serde_yaml::from_str(&world).expect("ERROR SERDE");
+    let mut game_world: GameWorld = serde_yaml::from_str(&world).expect("ERROR SERDE");
+    for npc in game_world.npcs.values_mut() {
+        if npc.stats.max_hp == 0 {
+            npc.stats.max_hp = npc.stats.hp;
+        }
+    }
     game_world
 }
 
