@@ -127,6 +127,16 @@ pub struct WhoReply {
     pub server: u32,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CombatReply {
+    pub action: String,
+    pub attacker_hp: u32,
+    pub target_hp: u32,
+    pub damage_dealt: u32,
+    pub damage_taken: u32,
+    pub status: String,
+    pub message: Option<String>
+}
 
 #[cfg(test)]
 mod tests {

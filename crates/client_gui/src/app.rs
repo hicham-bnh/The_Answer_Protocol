@@ -1,4 +1,4 @@
-use crate::protocol::{EvtType, LookReply, ServerMsg, StatusReply, TalkReply, WhoReply};
+use crate::protocol::{EvtType, LookReply, ServerMsg, StatusReply, TalkReply, WhoReply, CombatReply};
 use crate::state::{prettify, ChatTab, Room};
 use eframe::egui;
 use std::collections::VecDeque;
@@ -7,6 +7,7 @@ use std::sync::mpsc::{Receiver, Sender};
 pub struct TapClient {
     server_address: String,
     connected: bool,
+    disconnected: bool,
     username: String,
     room: Option<Room>,
     players: Vec<String>,
@@ -17,6 +18,11 @@ pub struct TapClient {
     hp: u32,
     max_hp: u32,
     group: Option<String>,
+    in_combat: bool,
+    combat_target: Option<String>,
+    combat_target_hp: u32,
+    combat_target_max_hp: u32,
+    combat_history: Vec<String>,
     chat_global: Vec<String>,
     chat_room: Vec<String>,
     chat_group: Vec<String>,
@@ -33,6 +39,7 @@ impl TapClient {
         TapClient {
             server_address: address,
             connected: false,
+            disconnected: false,
             username: String::new(),
             room: None,
             players: Vec::new(),
@@ -43,6 +50,11 @@ impl TapClient {
             hp: 100,
             max_hp: 100,
             group: None,
+            in_combat: false,
+            combat_target: None,
+            combat_target_hp: 0,
+            combat_target_max_hp: 0,
+            combat_history: Vec::new(),
             chat_global: Vec::new(),
             chat_room: Vec::new(),
             chat_group: Vec::new(),
@@ -52,53 +64,6 @@ impl TapClient {
             pending_cmds: VecDeque::new(),
             rx,
             tx_out,
-        }
-    }
-
-    pub fn fake(rx: Receiver<String>, tx_out: Sender<String>) -> TapClient {
-        use std::collections::HashMap;
-
-        TapClient {
-            connected: true,
-            room: Some(Room {
-                id: "loc.square".to_string(),
-                name: "Village Square".to_string(),
-                description: "The heart of the village. A stone fountain gurgles in the center."
-                    .to_string(),
-                exits: HashMap::from([
-                    ("north".to_string(), "loc.tavern".to_string()),
-                    ("east".to_string(), "loc.market".to_string()),
-                    ("south".to_string(), "loc.road".to_string()),
-                ]),
-            }),
-            players: vec!["alice".to_string(), "bob".to_string()],
-            username: "Matthieu".to_string(),
-            server_players: 2,
-            items: vec!["item.herbs".to_string()],
-            npcs: vec!["npc.guard".to_string()],
-            inventory: vec!["item.bread".to_string(), "item.rusty_sword".to_string()],
-            hp: 80,
-            max_hp: 100,
-            group: None,
-            chat_global: vec![
-                "alice: Hello everyone".to_string(),
-                "bob: hey!".to_string(),
-                "alice: anyone near the forge?".to_string(),
-                "carol: selling herbs, meet at the market".to_string(),
-            ],
-            chat_room: vec![
-                "bob: nice fountain".to_string(),
-                "alice: the guard says the roads are dangerous".to_string(),
-            ],
-            chat_group: vec![
-                "bob: let's do the goblin quest".to_string(),
-                "you: I need to buy a sword first".to_string(),
-            ],
-            logs: vec![
-                "Connected to 127.0.0.1:8080".to_string(),
-                "OK connected".to_string(),
-            ],
-            ..TapClient::new("127.0.0.1:8080".to_string(), rx, tx_out)
         }
     }
 
@@ -286,7 +251,7 @@ impl TapClient {
 
     fn right_panel(&mut self, ui: &mut egui::Ui) {
         egui::Panel::right("log_list").show(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
                 for log in &self.logs {
                     ui.label(format!("- {}", log));
                 }
@@ -300,13 +265,14 @@ impl TapClient {
         egui::Panel::bottom("chat_input").show(ui, |ui| {
             let response = ui.add(egui::TextEdit::singleline(&mut self.chat_input).char_limit(200));
             if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                let (scope, messages) = match self.active_tab {
-                    ChatTab::Global => ("GLOBAL", &mut self.chat_global),
-                    ChatTab::Room => ("ROOM", &mut self.chat_room),
-                    ChatTab::Group => ("GROUP", &mut self.chat_group),
+                let scope = match self.active_tab {
+                    ChatTab::Global => "GLOBAL",
+                    ChatTab::Room => "ROOM",
+                    ChatTab::Group => "GROUP",
                 };
-                pending = Some(format!("CHAT {scope} {}", self.chat_input));
-                messages.push(format!("{}: {}", self.username, self.chat_input));
+                if !self.chat_input.trim().is_empty() {
+                    pending = Some(format!("CHAT {scope} {}", self.chat_input));
+                }
                 self.chat_input.clear();
             }
         });
@@ -324,16 +290,18 @@ impl TapClient {
                 ui.selectable_value(&mut self.active_tab, ChatTab::Group, "Group");
             });
             ui.separator();
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                let messages = match self.active_tab {
-                    ChatTab::Global => &self.chat_global,
-                    ChatTab::Room => &self.chat_room,
-                    ChatTab::Group => &self.chat_group,
-                };
-                for msg in messages {
-                    ui.label(msg);
-                }
-            });
+            egui::ScrollArea::vertical()
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    let messages = match self.active_tab {
+                        ChatTab::Global => &self.chat_global,
+                        ChatTab::Room => &self.chat_room,
+                        ChatTab::Group => &self.chat_group,
+                    };
+                    for msg in messages {
+                        ui.label(msg);
+                    }
+                });
         });
     }
 
@@ -368,6 +336,7 @@ impl TapClient {
                     let first_word = cmd_splitter.next().unwrap_or("");
 
                     match first_word {
+
                         "CONNECT" => {
                             if data == "connected" {
                                 self.connected = true;
@@ -470,39 +439,89 @@ impl TapClient {
                             Ok(s) => {
                                 self.hp = s.hp;
                                 self.max_hp = s.max_hp;
-                            },
-                            Err(_) => self.logs.push(format!("Unexpected reply to STATUS: {data}")),
+                            }
+                            Err(_) => self
+                                .logs
+                                .push(format!("Unexpected reply to STATUS: {data}")),
                         },
 
                         "LOOK" => match serde_json::from_str::<LookReply>(&data) {
                             Ok(s) => {
-	                            self.room = Some(s.room);
-	                            self.players = s.players;
-	                            self.items = s.items;
-	                            self.npcs = s.npcs;
-                            },
+                                self.room = Some(s.room);
+                                self.players = s.players;
+                                self.items = s.items;
+                                self.npcs = s.npcs;
+                            }
                             Err(_) => self.logs.push(format!("Unexpected reply to LOOK: {data}")),
-                        }
+                        },
 
                         "WHO" => match serde_json::from_str::<WhoReply>(&data) {
                             Ok(s) => {
                                 self.players = s.room;
                                 self.server_players = s.server;
-                            },
+                            }
                             Err(_) => self.logs.push(format!("Unexpected reply to WHO: {data}")),
-                        }
+                        },
 
-                        "TALK" => match serde_json::from_str::<TalkReply>(&data) {	
-                            Ok(s) => self.chat_room.push(format!("[NPC DIALOGUE] {}: {}", s.npc, s.dialogue)),
+                        "TALK" => match serde_json::from_str::<TalkReply>(&data) {
+                            Ok(s) => self
+                                .chat_room
+                                .push(format!("[NPC DIALOGUE] {}: {}", s.npc, s.dialogue)),
                             Err(_) => self.logs.push(format!("Unexpected reply to TALK: {data}")),
-                        }
+                        },
 
                         "INVENTORY" => match serde_json::from_str::<Vec<String>>(&data) {
-                           Ok(s) => self.inventory = s,
-                           Err(_) => self.logs.push(format!("Unexpected reply to INVENTORY: {data}")),
+                            Ok(s) => self.inventory = s,
+                            Err(_) => self.logs.push(format!("Unexpected reply to INVENTORY: {data}")),
+                        },
+
+                        w @ ("ATTACK" | "DEFEND" | "FLEE") => match serde_json::from_str::<CombatReply>(&data){
+                            Ok(s) => {
+                                match cmd_splitter.next() {
+                                    Some(ennemy_name) => {
+                                        if self.in_combat {
+                                            self.logs.push(format!("Unexpected reply to {w}: {data} (already in a fight)"))
+                                        } else {
+                                            self.in_combat = true;
+                                            self.combat_target = Some(ennemy_name.to_string());
+                                            self.hp = s.attacker_hp;
+                                            self.combat_target_hp = s.target_hp;
+                                            self.combat_target_max_hp = s.target_hp;
+                                            if let Some(combat_log) = s.message {
+                                                self.combat_history.push(combat_log);
+                                            }
+                                        }
+                                    },
+                                    None => {
+                                        if !self.in_combat {
+                                            self.logs.push(format!("Unexpected reply to {w}: {data} (not in a fight)"))
+                                        } else {
+                                            match s.status.as_str() {
+                                                "in_combat" => {
+                                                    self.hp = s.attacker_hp;
+                                                    self.combat_target_hp = s.target_hp;
+                                                    self.combat_history.push(format!("Inflicted {} to {}, counter attacked for {}", s.damage_dealt, self.combat_target.as_deref().unwrap_or("Unknown"), s.damage_taken))
+                                                },
+                                                "won" | "fled" | "dead" => {
+                                                    self.in_combat = false;
+                                                    self.combat_target = None;
+                                                    self.combat_target_hp = 0;
+                                                    self.combat_target_max_hp = 0;
+                                                    self.combat_history.push(s.message.unwrap_or_else(|| "Combat ended".to_string()));
+                                                    self.send_command("LOOK".to_string());
+                                                    self.send_command("STATUS".to_string());
+                                                }
+                                                _ => self.logs.push(format!("Unexpected reply to {w}: {data}")),
+                                            }
+                                        }
+                                    }
+                                } 
+                            },
+                            
+                            Err(_) => self.logs.push(format!("Unexpected reply to {w}: {data}")),
                         }
 
-                        "QUEST" =>  self.logs.push("Need to implement QUEST command".to_string()),
+                        "QUEST" => self.logs.push("Need to implement QUEST command".to_string()),
 
                         "QUIT" => {
                             if data != "bye" {
@@ -519,14 +538,25 @@ impl TapClient {
                 None => self.logs.push(format!("Unsolicited OK: {data}")),
             },
 
-            ServerMsg::Err(code, description) => match self.pending_cmds.pop_front() {
-                Some(cmd) => self
-                    .logs
-                    .push(format!("ERR to '{cmd}': {code} {description}")),
-                None => self
-                    .logs
-                    .push(format!("Unsolicited ERR: {code} {description}")),
-            },
+            ServerMsg::Err(code, description) => {
+                if code == 900 {
+                    self.disconnected = true;
+                    self.logs.push(format!("Disconnected: {description}"));
+                } else {
+                    match self.pending_cmds.pop_front() {
+                        Some(cmd) => {
+                            if code == 900 {
+                                self.disconnected = true;
+                                self.logs.push(format!("Disconnected: {description}"));
+                            } else {
+                                self.logs
+                                    .push(format!("ERR to '{cmd}': {code} {description}"));
+                            }
+                        }
+                        None => self.logs.push(format!("Unsolicited ERR: {code} {description}")),
+                    }
+                }
+            }
             ServerMsg::Unknown(data) => self.logs.push(format!("(unparsed) {data}")),
         }
     }
@@ -538,8 +568,13 @@ impl eframe::App for TapClient {
             self.logs.push(format!("<< {line}"));
             self.apply(crate::protocol::parse_line(&line));
         }
-
-        if self.connected {
+        if self.disconnected {
+            self.right_panel(ui);
+            egui::CentralPanel::default().show(ui, |ui| {
+                ui.add_space(40.0);
+                ui.heading("You've been disconnected");
+            });
+        } else if self.connected {
             self.top_panel(ui);
             self.left_panel(ui);
             self.right_panel(ui);
@@ -551,8 +586,6 @@ impl eframe::App for TapClient {
         }
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -598,7 +631,11 @@ mod tests {
     #[test]
     fn status_ok_updates_hp() {
         let (mut c, _out) = client();
-        feed(&mut c, "STATUS", r#"OK {"hp": 55, "max_hp": 120, "status": "healthy"}"#);
+        feed(
+            &mut c,
+            "STATUS",
+            r#"OK {"hp": 55, "max_hp": 120, "status": "healthy"}"#,
+        );
         assert_eq!(c.hp, 55);
         assert_eq!(c.max_hp, 120);
     }
@@ -645,7 +682,11 @@ mod tests {
     #[test]
     fn look_missing_key_is_logged_room_stays_none() {
         let (mut c, _out) = client();
-        feed(&mut c, "LOOK", r#"OK {"players": [], "items": [], "npcs": []}"#);
+        feed(
+            &mut c,
+            "LOOK",
+            r#"OK {"players": [], "items": [], "npcs": []}"#,
+        );
         assert!(c.room.is_none());
         assert!(last_log(&c).contains("LOOK"));
     }
@@ -669,7 +710,11 @@ mod tests {
     #[test]
     fn who_ok_updates_server_players_and_room_list() {
         let (mut c, _out) = client();
-        feed(&mut c, "WHO", r#"OK {"room": ["alice", "bob"], "server": 7}"#);
+        feed(
+            &mut c,
+            "WHO",
+            r#"OK {"room": ["alice", "bob"], "server": 7}"#,
+        );
         assert_eq!(c.server_players, 7);
         assert_eq!(c.players, vec!["alice", "bob"]);
     }
@@ -677,7 +722,11 @@ mod tests {
     #[test]
     fn talk_ok_displays_dialogue_in_room_chat() {
         let (mut c, _out) = client();
-        feed(&mut c, "TALK npc.guard", r#"OK {"npc": "guard", "dialogue": "Stay safe, traveler."}"#);
+        feed(
+            &mut c,
+            "TALK npc.guard",
+            r#"OK {"npc": "guard", "dialogue": "Stay safe, traveler."}"#,
+        );
         let line = c.chat_room.last().expect("dialogue should be in room chat");
         assert!(line.contains("Stay safe, traveler."));
         assert!(line.contains("guard"));

@@ -35,6 +35,8 @@ pub fn start(address: String, tx: Sender<String>, rx_out: Receiver<String>, ctx:
                         break;
                     };
                 }
+                let _ = tx.send("ERR 900 DISCONNECTED".to_string());
+                ctx.request_repaint();
                 break;
             }
             Err(e) => {
