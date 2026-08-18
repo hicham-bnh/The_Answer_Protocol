@@ -1,4 +1,6 @@
-use crate::protocol::{CombatReply, EvtType, LookReply, ServerMsg, StatusReply, TalkReply, WhoReply, QuestReply};
+use crate::protocol::{
+    CombatReply, EvtType, LookReply, QuestReply, ServerMsg, StatusReply, TalkReply, WhoReply,
+};
 use crate::state::{prettify, ChatTab, Room};
 use eframe::egui;
 use std::collections::VecDeque;
@@ -255,6 +257,10 @@ impl TapClient {
 
                     ui.label(egui::RichText::new("Players here:").size(20.0));
                     for player in &self.players {
+                        if player.to_string() == self.username {
+                            ui.label(player.to_owned() + " (You)");
+                            continue;
+                        }
                         ui.horizontal(|ui| {
                             ui.label(player);
                             if ui
@@ -315,6 +321,27 @@ impl TapClient {
                             pending = Some(format!("DROP {item}"));
                         }
                     });
+                }
+
+                ui.separator();
+
+                ui.label(egui::RichText::new("Quests: ").size(20.0));
+                ui.add_space(4.0);
+                if self.quests.is_empty() {
+                    ui.label(egui::RichText::new("No active quest").weak());
+                }
+                for quest in &self.quests {
+                    let title = quest
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| prettify(&quest.quest_id));
+                    ui.label(
+                        egui::RichText::new(format!("{} ({})", title, quest.progress)).strong(),
+                    );
+                    if let Some(desc) = &quest.description {
+                        ui.label(egui::RichText::new(desc).weak());
+                    }
+                    ui.add_space(6.0);
                 }
             });
         if let Some(cmd) = pending {
@@ -601,30 +628,39 @@ impl TapClient {
                                     }
                                 }
 
-                                Err(_) => self.logs.push(format!("Unexpected reply to {w}: {data}"))
+                                Err(_) => {
+                                    self.logs.push(format!("Unexpected reply to {w}: {data}"))
+                                }
                             }
                         }
 
                         "QUESTS" => match serde_json::from_str::<Vec<QuestReply>>(&data) {
                             Ok(s) => self.quests = s,
-                            Err(_) => self.logs.push(format!("Unexpected reply to QUESTS: {data}"))
+                            Err(_) => self
+                                .logs
+                                .push(format!("Unexpected reply to QUESTS: {data}")),
                         },
 
                         "QUEST" => match cmd_splitter.next() {
-                            Some(_) => {
-                                match serde_json::from_str::<QuestReply>(&data) {
-                                    Ok(s) => {
-                                        if let Some(index) = self.quests.iter().position(|q| q.quest_id == s.quest_id) {
-                                            self.quests[index] = s;
-                                        } else {
-                                            self.quests.push(s);
-                                        }
-                                    },
-                                    Err(_) => self.logs.push(format!("Unexpected reply to QUEST: {data}"))
+                            Some(_) => match serde_json::from_str::<QuestReply>(&data) {
+                                Ok(s) => {
+                                    if s.status == "completed" {
+                                        self.send_command("INVENTORY".to_string());
+                                    }
+                                    if let Some(index) =
+                                        self.quests.iter().position(|q| q.quest_id == s.quest_id)
+                                    {
+                                        self.quests[index] = s;
+                                    } else {
+                                        self.quests.push(s);
+                                    }
+                                }
+                                Err(_) => {
+                                    self.logs.push(format!("Unexpected reply to QUEST: {data}"))
                                 }
                             },
-                            None => self.logs.push(format!("Unexpected reply to QUEST: {data}"))
-                        }
+                            None => self.logs.push(format!("Unexpected reply to QUEST: {data}")),
+                        },
 
                         "QUIT" => {
                             if data != "bye" {
@@ -635,6 +671,9 @@ impl TapClient {
                         }
 
                         _ => self.logs.push(format!("OK to '{cmd}': {data}")),
+                    }
+                    if first_word != "QUESTS" && !self.in_combat {
+                        self.send_command("QUESTS".to_string());
                     }
                 }
 

@@ -614,7 +614,6 @@ pub fn parse_command(
                 let room_player = player.room.clone();
                 let mut w = world.lock().unwrap();
 
-                // 1. Résolution de l'ID (par ID direct ou par display name)
                 let target_id: Option<String> = if w.items.contains_key(input) {
                     Some(input.to_string())
                 } else {
@@ -629,7 +628,6 @@ pub fn parse_command(
                     return;
                 };
 
-                // 2. Vérification de la présence dans la pièce d'abord
                 let in_room = w
                     .world
                     .locations
@@ -642,14 +640,12 @@ pub fn parse_command(
                     return;
                 }
 
-                // 3. Vérification s'il est obtenable
                 let is_obtainable = w.items.get(&item_id).map(|i| i.obtainable).unwrap_or(false);
                 if !is_obtainable {
                     send_err(stream, "405 ITEM_NOT_OBTAINABLE");
                     return;
                 }
 
-                // 4. Retrait de la pièce et ajout dans l'inventaire
                 if let Some(location) = w.world.locations.get_mut(&room_player) {
                     if let Some(index) = location.items.iter().position(|x| x == &item_id) {
                         location.items.remove(index);
@@ -686,7 +682,6 @@ pub fn parse_command(
                 let room_player = player.room.clone();
                 let mut w = world.lock().unwrap();
 
-                // Chercher l'item dans l'inventaire soit par ID direct, soit par nom d'affichage
                 let found_index = player.inventory.iter().position(|inv_item_id| {
                     inv_item_id == input
                         || w.items
@@ -832,8 +827,16 @@ pub fn parse_command(
                         }
                         let reply = QuestReply {
                             quest_id: qid.clone(),
-                            name: w.quests.get(qid).map(|q| q.name.clone()).unwrap_or_else(|| qid.clone()),
-                            description: w.quests.get(qid).map(|q| q.description.clone()).unwrap_or_default(),
+                            name: w
+                                .quests
+                                .get(qid)
+                                .map(|q| q.name.clone())
+                                .unwrap_or_else(|| qid.clone()),
+                            description: w
+                                .quests
+                                .get(qid)
+                                .map(|q| q.description.clone())
+                                .unwrap_or_default(),
                             status: "completed".to_string(),
                             progress: "done".to_string(),
                         };
@@ -848,8 +851,16 @@ pub fn parse_command(
                     } else {
                         let reply = QuestReply {
                             quest_id: qid.clone(),
-                            name: w.quests.get(qid).map(|q| q.name.clone()).unwrap_or_else(|| qid.clone()),
-                            description: w.quests.get(qid).map(|q| q.description.clone()).unwrap_or_default(),
+                            name: w
+                                .quests
+                                .get(qid)
+                                .map(|q| q.name.clone())
+                                .unwrap_or_else(|| qid.clone()),
+                            description: w
+                                .quests
+                                .get(qid)
+                                .map(|q| q.description.clone())
+                                .unwrap_or_default(),
                             status: "in_progress".to_string(),
                             progress: format!("{}/{}", current, total),
                         };
@@ -870,8 +881,16 @@ pub fn parse_command(
                         .unwrap_or(1);
                     let reply = QuestReply {
                         quest_id: qid.clone(),
-                        name: w.quests.get(qid).map(|q| q.name.clone()).unwrap_or_else(|| qid.clone()),
-                        description: w.quests.get(qid).map(|q| q.description.clone()).unwrap_or_default(),
+                        name: w
+                            .quests
+                            .get(qid)
+                            .map(|q| q.name.clone())
+                            .unwrap_or_else(|| qid.clone()),
+                        description: w
+                            .quests
+                            .get(qid)
+                            .map(|q| q.description.clone())
+                            .unwrap_or_default(),
                         status: "in_progress".to_string(),
                         progress: format!("0/{}", total),
                     };
@@ -1004,7 +1023,6 @@ pub fn parse_command(
                 let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
                 let _ = stream.write_all(msg.as_bytes());
 
-                // Broadcast room de début de combat
                 {
                     let mut guard = players.lock().unwrap();
                     let evt = format!(
@@ -1135,7 +1153,6 @@ pub fn parse_command(
                 let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
                 let _ = stream.write_all(msg.as_bytes());
 
-                // Broadcast room de victoire
                 {
                     let mut guard = players.lock().unwrap();
                     let evt = format!(
@@ -1194,7 +1211,6 @@ pub fn parse_command(
                 let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
                 let _ = stream.write_all(msg.as_bytes());
 
-                // Broadcast room de mort du joueur
                 {
                     let mut guard = players.lock().unwrap();
                     let evt = format!(
@@ -1302,7 +1318,6 @@ pub fn parse_command(
                 let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
                 let _ = stream.write_all(msg.as_bytes());
 
-                // Broadcast room de mort
                 {
                     let mut guard = players.lock().unwrap();
                     let evt = format!(
@@ -1382,7 +1397,6 @@ pub fn parse_command(
             let msg = format!("OK {}\n", serde_json::to_string(&reply).unwrap());
             let _ = stream.write_all(msg.as_bytes());
 
-            // Broadcast room de fuite
             {
                 let mut guard = players.lock().unwrap();
                 let evt = format!(

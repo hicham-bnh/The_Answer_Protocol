@@ -1,9 +1,9 @@
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
-use std::io::{Write, BufReader, BufRead};
-use std::net::{TcpListener, TcpStream};
-use std::fs;
 use serde_json::json;
+use std::collections::HashMap;
+use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::{Arc, Mutex};
 
 mod protocol {
     pub mod command;
@@ -60,7 +60,11 @@ fn lunch(
     let stream_clone = match stream.try_clone() {
         Ok(s) => s,
         Err(e) => {
-            log("ERROR", "stream_clone_failed", json!({"ip": peer, "error": e.to_string()}));
+            log(
+                "ERROR",
+                "stream_clone_failed",
+                json!({"ip": peer, "error": e.to_string()}),
+            );
             return;
         }
     };
@@ -71,11 +75,19 @@ fn lunch(
         let line = match line {
             Ok(l) => l,
             Err(e) => {
-                log("WARN", "read_error", json!({"ip": peer, "player": name, "error": e.to_string()}));
+                log(
+                    "WARN",
+                    "read_error",
+                    json!({"ip": peer, "player": name, "error": e.to_string()}),
+                );
                 break;
             }
         };
-        log("INFO", "command_received", json!({"player": name, "line": line}));
+        log(
+            "INFO",
+            "command_received",
+            json!({"player": name, "line": line}),
+        );
         if line.trim() == "QUIT" {
             if is_connect {
                 parse_command(&line, &mut stream, &players, &name, &world, &next_group_id);
@@ -93,7 +105,11 @@ fn lunch(
     if is_connect {
         disconnect_player(&name, &players);
     }
-    log("INFO", "connection_closed", json!({"ip": peer, "player": name}));
+    log(
+        "INFO",
+        "connection_closed",
+        json!({"ip": peer, "player": name}),
+    );
 }
 
 fn main() {
@@ -111,7 +127,13 @@ fn main() {
                 let next_group_id_clone = Arc::clone(&next_group_id);
                 let value = spawn_room.clone();
                 std::thread::spawn(move || {
-                    lunch(stream, players_clone, value.clone(), world_clone, next_group_id_clone)
+                    lunch(
+                        stream,
+                        players_clone,
+                        value.clone(),
+                        world_clone,
+                        next_group_id_clone,
+                    )
                 });
             }
             Err(e) => {

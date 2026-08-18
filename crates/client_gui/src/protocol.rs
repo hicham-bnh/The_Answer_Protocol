@@ -135,7 +135,7 @@ pub struct CombatReply {
     pub damage_dealt: u32,
     pub damage_taken: u32,
     pub status: String,
-    pub message: Option<String>
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -147,17 +147,21 @@ pub struct QuestReply {
     pub progress: String,
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn parse_ok() {
-        assert_eq!(parse_line("OK connected"), ServerMsg::Ok("connected".to_string()));
+        assert_eq!(
+            parse_line("OK connected"),
+            ServerMsg::Ok("connected".to_string())
+        );
         assert_eq!(parse_line("OK"), ServerMsg::Ok("".to_string()));
-        assert_eq!(parse_line("OK hello proto=1"), ServerMsg::Ok("hello proto=1".to_string()));
+        assert_eq!(
+            parse_line("OK hello proto=1"),
+            ServerMsg::Ok("hello proto=1".to_string())
+        );
         assert_eq!(
             parse_line(r#"OK { "room": { }, "players":["alice"] }"#),
             ServerMsg::Ok(r#"{ "room": { }, "players":["alice"] }"#.to_string())
@@ -166,11 +170,26 @@ mod tests {
 
     #[test]
     fn parse_err() {
-        assert_eq!(parse_line("ERR 404 ITEM_NOT_FOUND"), ServerMsg::Err(404, "ITEM_NOT_FOUND".to_string()));
-        assert_eq!(parse_line("ERR 201 NAME_IN_USE"), ServerMsg::Err(201, "NAME_IN_USE".to_string()));
-        assert_eq!(parse_line("ERR abc xyz"), ServerMsg::Unknown("Malformed ERR: ERR abc xyz".to_string()));
-        assert_eq!(parse_line("ERR"), ServerMsg::Unknown("Malformed ERR: ERR".to_string()));
-        assert_eq!(parse_line("ERR 404"), ServerMsg::Unknown("Malformed ERR: ERR 404".to_string()));
+        assert_eq!(
+            parse_line("ERR 404 ITEM_NOT_FOUND"),
+            ServerMsg::Err(404, "ITEM_NOT_FOUND".to_string())
+        );
+        assert_eq!(
+            parse_line("ERR 201 NAME_IN_USE"),
+            ServerMsg::Err(201, "NAME_IN_USE".to_string())
+        );
+        assert_eq!(
+            parse_line("ERR abc xyz"),
+            ServerMsg::Unknown("Malformed ERR: ERR abc xyz".to_string())
+        );
+        assert_eq!(
+            parse_line("ERR"),
+            ServerMsg::Unknown("Malformed ERR: ERR".to_string())
+        );
+        assert_eq!(
+            parse_line("ERR 404"),
+            ServerMsg::Unknown("Malformed ERR: ERR 404".to_string())
+        );
     }
 
     #[test]
@@ -189,23 +208,44 @@ mod tests {
     fn parse_chat() {
         assert_eq!(
             parse_line("EVT ROOM CHAT alice salut tout le monde"),
-            ServerMsg::Evt(EvtType::Chat(ChatTab::Room, "alice".to_string(), "salut tout le monde".to_string()))
+            ServerMsg::Evt(EvtType::Chat(
+                ChatTab::Room,
+                "alice".to_string(),
+                "salut tout le monde".to_string()
+            ))
         );
         assert_eq!(
             parse_line("EVT GLOBAL CHAT bob hey!"),
-            ServerMsg::Evt(EvtType::Chat(ChatTab::Global, "bob".to_string(), "hey!".to_string()))
+            ServerMsg::Evt(EvtType::Chat(
+                ChatTab::Global,
+                "bob".to_string(),
+                "hey!".to_string()
+            ))
         );
         assert_eq!(
             parse_line("EVT GROUP CHAT carol on y va"),
-            ServerMsg::Evt(EvtType::Chat(ChatTab::Group, "carol".to_string(), "on y va".to_string()))
+            ServerMsg::Evt(EvtType::Chat(
+                ChatTab::Group,
+                "carol".to_string(),
+                "on y va".to_string()
+            ))
         );
     }
 
     #[test]
     fn parse_group() {
-        assert_eq!(parse_line("EVT GROUP INVITE alice"), ServerMsg::Evt(EvtType::GroupInvite("alice".to_string())));
-        assert_eq!(parse_line("EVT GROUP JOIN bob"), ServerMsg::Evt(EvtType::GroupJoin("bob".to_string())));
-        assert_eq!(parse_line("EVT GROUP LEAVE carol"), ServerMsg::Evt(EvtType::GroupLeave("carol".to_string())));
+        assert_eq!(
+            parse_line("EVT GROUP INVITE alice"),
+            ServerMsg::Evt(EvtType::GroupInvite("alice".to_string()))
+        );
+        assert_eq!(
+            parse_line("EVT GROUP JOIN bob"),
+            ServerMsg::Evt(EvtType::GroupJoin("bob".to_string()))
+        );
+        assert_eq!(
+            parse_line("EVT GROUP LEAVE carol"),
+            ServerMsg::Evt(EvtType::GroupLeave("carol".to_string()))
+        );
         assert_eq!(
             parse_line("EVT GROUP INVITE alice bob"),
             ServerMsg::Unknown("Malformed EVT: EVT GROUP INVITE alice bob".to_string())
@@ -214,7 +254,10 @@ mod tests {
 
     #[test]
     fn parse_stats() {
-        assert_eq!(parse_line("EVT STATS players=5"), ServerMsg::Evt(EvtType::PlayerCount(5)));
+        assert_eq!(
+            parse_line("EVT STATS players=5"),
+            ServerMsg::Evt(EvtType::PlayerCount(5))
+        );
         assert_eq!(
             parse_line("EVT STATS players=abc"),
             ServerMsg::Unknown("Malformed EVT: EVT STATS players=abc".to_string())
@@ -223,7 +266,13 @@ mod tests {
 
     #[test]
     fn parse_garbage() {
-        assert_eq!(parse_line("GARBAGE stuff"), ServerMsg::Unknown("Malformed message: GARBAGE stuff".to_string()));
-        assert_eq!(parse_line(""), ServerMsg::Unknown("Malformed message: ".to_string()));
+        assert_eq!(
+            parse_line("GARBAGE stuff"),
+            ServerMsg::Unknown("Malformed message: GARBAGE stuff".to_string())
+        );
+        assert_eq!(
+            parse_line(""),
+            ServerMsg::Unknown("Malformed message: ".to_string())
+        );
     }
 }

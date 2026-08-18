@@ -600,9 +600,6 @@ dependencies = [
 [[package]]
 name = "client_cli"
 version = "0.1.0"
-dependencies = [
- "shared",
-]
 
 [[package]]
 name = "client_gui"
@@ -611,7 +608,6 @@ dependencies = [
  "eframe",
  "serde",
  "serde_json",
- "shared",
 ]
 
 [[package]]
@@ -2784,7 +2780,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "shared",
 ]
 
 [[package]]

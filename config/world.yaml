@@ -115,10 +115,20 @@ items:
     description: "A cold mug of the tavern's finest ale."
     obtainable: true
 
+  item.strong_ale:
+    name: "Strong Ale"
+    description: "A very strong ale gifted by the elder."
+    obtainable: true
+
   item.ancient_altar:
     name: "Ancient Altar"
     description: "A massive stone altar carved with unreadable runes. Far too heavy to move."
     obtainable: false
+
+  item.shield:
+    name: "Iron Shield"
+    description: "A robust shield rewarded for defeating the goblin."
+    obtainable: true
 
 npcs:
   npc.guard:
@@ -190,4 +200,4 @@ quests:
       target: "npc.goblin"
       count: 1
     reward:
-      item: "item.sword"
+      item: "item.shield"

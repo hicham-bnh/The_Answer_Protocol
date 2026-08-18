@@ -30,9 +30,6 @@ pub struct Npc {
     #[serde(default)]
     pub respawn_seconds: Option<u32>,
     pub engaged_by: Option<String>,
-    // NOTE (correction point 4 - TALK) : pas dans le yaml, jamais désérialisé.
-    // Sert uniquement à faire tourner les répliques d'un NPC à chaque TALK
-    // (round-robin en mémoire, remis à zéro au redémarrage du serveur).
     #[serde(default, skip_deserializing)]
     pub dialogue_index: usize,
 }
