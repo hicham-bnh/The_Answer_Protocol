@@ -138,6 +138,17 @@ pub struct CombatReply {
     pub message: Option<String>
 }
 
+#[derive(Debug, Deserialize)]
+pub struct QuestReply {
+    pub quest_id: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub status: String,
+    pub progress: String,
+}
+
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

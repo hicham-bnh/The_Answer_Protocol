@@ -60,6 +60,8 @@ struct CombatReply {
 #[derive(Serialize)]
 struct QuestReply {
     quest_id: String,
+    name: String,
+    description: String,
     status: String,
     progress: String,
 }
@@ -830,6 +832,8 @@ pub fn parse_command(
                         }
                         let reply = QuestReply {
                             quest_id: qid.clone(),
+                            name: w.quests.get(qid).map(|q| q.name.clone()).unwrap_or_else(|| qid.clone()),
+                            description: w.quests.get(qid).map(|q| q.description.clone()).unwrap_or_default(),
                             status: "completed".to_string(),
                             progress: "done".to_string(),
                         };
@@ -844,6 +848,8 @@ pub fn parse_command(
                     } else {
                         let reply = QuestReply {
                             quest_id: qid.clone(),
+                            name: w.quests.get(qid).map(|q| q.name.clone()).unwrap_or_else(|| qid.clone()),
+                            description: w.quests.get(qid).map(|q| q.description.clone()).unwrap_or_default(),
                             status: "in_progress".to_string(),
                             progress: format!("{}/{}", current, total),
                         };
@@ -864,6 +870,8 @@ pub fn parse_command(
                         .unwrap_or(1);
                     let reply = QuestReply {
                         quest_id: qid.clone(),
+                        name: w.quests.get(qid).map(|q| q.name.clone()).unwrap_or_else(|| qid.clone()),
+                        description: w.quests.get(qid).map(|q| q.description.clone()).unwrap_or_default(),
                         status: "in_progress".to_string(),
                         progress: format!("0/{}", total),
                     };
@@ -894,6 +902,8 @@ pub fn parse_command(
                     let current = player.quest_progress.get(qid).copied().unwrap_or(0);
                     list.push(json!({
                         "quest_id": qid,
+                        "name": w.quests.get(qid).map(|q| q.name.clone()).unwrap_or_else(|| qid.clone()),
+                        "description": w.quests.get(qid).map(|q| q.description.clone()).unwrap_or_default(),
                         "status": "in_progress",
                         "progress": format!("{}/{}", current, total),
                     }));
@@ -901,6 +911,8 @@ pub fn parse_command(
                 for qid in &player.quest_dine {
                     list.push(json!({
                         "quest_id": qid,
+                        "name": w.quests.get(qid).map(|q| q.name.clone()).unwrap_or_else(|| qid.clone()),
+                        "description": w.quests.get(qid).map(|q| q.description.clone()).unwrap_or_default(),
                         "status": "completed",
                         "progress": "done",
                     }));

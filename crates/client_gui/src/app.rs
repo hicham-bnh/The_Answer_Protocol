@@ -1,6 +1,4 @@
-use crate::protocol::{
-    CombatReply, EvtType, LookReply, ServerMsg, StatusReply, TalkReply, WhoReply,
-};
+use crate::protocol::{CombatReply, EvtType, LookReply, ServerMsg, StatusReply, TalkReply, WhoReply, QuestReply};
 use crate::state::{prettify, ChatTab, Room};
 use eframe::egui;
 use std::collections::VecDeque;
@@ -26,6 +24,7 @@ pub struct TapClient {
     combat_target_hp: u32,
     combat_target_max_hp: u32,
     combat_history: Vec<String>,
+    quests: Vec<QuestReply>,
     chat_global: Vec<String>,
     chat_room: Vec<String>,
     chat_group: Vec<String>,
@@ -59,6 +58,7 @@ impl TapClient {
             combat_target_hp: 0,
             combat_target_max_hp: 0,
             combat_history: Vec::new(),
+            quests: Vec::new(),
             chat_global: Vec::new(),
             chat_room: Vec::new(),
             chat_group: Vec::new(),
@@ -601,15 +601,30 @@ impl TapClient {
                                     }
                                 }
 
-                                Err(_) => {
-                                    self.logs.push(format!("Unexpected reply to {w}: {data}"))
-                                }
+                                Err(_) => self.logs.push(format!("Unexpected reply to {w}: {data}"))
                             }
                         }
 
-                        "QUEST" => self
-                            .logs
-                            .push("Need to implement QUEST command".to_string()),
+                        "QUESTS" => match serde_json::from_str::<Vec<QuestReply>>(&data) {
+                            Ok(s) => self.quests = s,
+                            Err(_) => self.logs.push(format!("Unexpected reply to QUESTS: {data}"))
+                        },
+
+                        "QUEST" => match cmd_splitter.next() {
+                            Some(_) => {
+                                match serde_json::from_str::<QuestReply>(&data) {
+                                    Ok(s) => {
+                                        if let Some(index) = self.quests.iter().position(|q| q.quest_id == s.quest_id) {
+                                            self.quests[index] = s;
+                                        } else {
+                                            self.quests.push(s);
+                                        }
+                                    },
+                                    Err(_) => self.logs.push(format!("Unexpected reply to QUEST: {data}"))
+                                }
+                            },
+                            None => self.logs.push(format!("Unexpected reply to QUEST: {data}"))
+                        }
 
                         "QUIT" => {
                             if data != "bye" {
