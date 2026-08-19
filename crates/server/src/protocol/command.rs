@@ -5,7 +5,7 @@ use std::io::Write;
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::json;
@@ -197,6 +197,8 @@ pub fn connect_user(
                 group: None,
                 invite_from: None,
                 dialogue_progress: HashMap::new(),
+                command: 0,
+                time_command: Instant::now()
             };
             guard.insert(name.clone(), player);
             let _ = stream.write_all(b"OK connected\n");
@@ -304,6 +306,22 @@ pub fn parse_command(
                 json!({"player": name, "command": cmd_name}),
             );
             return;
+        }
+    }
+    {
+        let mut guard = players.lock().unwrap();
+        if let Some(player) = guard.get_mut(name) {
+            if player.time_command.elapsed() >= Duration::from_secs(10) {
+                player.command = 0;
+                player.time_command = Instant::now();
+            }
+            else if player.command > 30 {
+                log("WARN", "flood_detected", json!({"player": name, "count": &player.command}));
+                player.command = 0;
+                player.time_command = Instant::now();
+                return ;
+            }
+            player.command += 1;
         }
     }
     match cmd {
