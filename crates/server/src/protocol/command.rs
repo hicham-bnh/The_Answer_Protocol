@@ -1,4 +1,4 @@
-use crate::world_struct::world_struct::GameWorld;
+use crate::world_struct::GameWorld;
 use crate::Player;
 use std::collections::HashMap;
 use std::io::Write;
@@ -198,7 +198,7 @@ pub fn connect_user(
                 invite_from: None,
                 dialogue_progress: HashMap::new(),
                 command: 0,
-                time_command: Instant::now()
+                time_command: Instant::now(),
             };
             guard.insert(name.clone(), player);
             let _ = stream.write_all(b"OK connected\n");
@@ -314,9 +314,12 @@ pub fn parse_command(
             if player.time_command.elapsed() >= Duration::from_secs(5) {
                 player.command = 0;
                 player.time_command = Instant::now();
-            }
-            else if player.command > 100 {
-                log("WARN", "flood_detected", json!({"player": name, "count": &player.command}));
+            } else if player.command > 100 {
+                log(
+                    "WARN",
+                    "flood_detected",
+                    json!({"player": name, "count": &player.command}),
+                );
                 player.command = 0;
                 player.time_command = Instant::now();
             }
@@ -382,7 +385,7 @@ pub fn parse_command(
 
                     let leave_evt = format!("EVT ROOM PRESENCE LEAVE {}\n", name);
                     let enter_evt = format!("EVT ROOM PRESENCE ENTER {}\n", name);
-                    for (_client_name, client_steam) in guard.iter_mut() {
+                    for client_steam in guard.values_mut() {
                         if client_steam.room == room_str {
                             let _ = client_steam
                                 .stream
@@ -433,7 +436,7 @@ pub fn parse_command(
                     Some(my_group) => {
                         let _ = stream.write_all(b"OK\n");
                         let evt = format!("EVT GROUP CHAT {} {}\n", name, chat_msg);
-                        for (_client_name, client_steam) in guard.iter_mut() {
+                        for client_steam in guard.values_mut() {
                             if client_steam.group.as_deref() == Some(my_group.as_str()) {
                                 let _ = client_steam
                                     .stream
@@ -750,7 +753,7 @@ pub fn parse_command(
                 return;
             };
 
-            let mut w = world.lock().unwrap();
+            let w = world.lock().unwrap();
             let Some(npc_id) = find_npc_in_room(&w, &room, npc_arg) else {
                 send_err(stream, "404 NPC_NOT_FOUND");
                 return;

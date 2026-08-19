@@ -257,7 +257,7 @@ impl TapClient {
 
                     ui.label(egui::RichText::new("Players here:").size(20.0));
                     for player in &self.players {
-                        if player.to_string() == self.username {
+                        if *player == self.username {
                             ui.label(player.to_owned() + " (You)");
                             continue;
                         }
@@ -565,9 +565,11 @@ impl TapClient {
                         },
 
                         "TALK" => match serde_json::from_str::<TalkReply>(&data) {
-                            Ok(s) => self
-                                .chat_room
-                                .push(format!("[NPC DIALOGUE] {}: {}", prettify(&s.npc), s.dialogue)),
+                            Ok(s) => self.chat_room.push(format!(
+                                "[NPC DIALOGUE] {}: {}",
+                                prettify(&s.npc),
+                                s.dialogue
+                            )),
                             Err(_) => self.logs.push(format!("Unexpected reply to TALK: {data}")),
                         },
 

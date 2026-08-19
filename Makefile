@@ -1,14 +1,19 @@
+ARGS ?= 127.0.0.1:8080
+
 install:
-	cargo install
+	cargo build
+
+run-client:
+	cargo run -p client_cli -- $(ARGS)
+
+run-client-gui:
+	cargo run -p client_gui -- $(ARGS)
 
 run-server:
 	cargo run -p server
 
-run-client:
-	cargo run -p client_cli
-
-run-client-gui:
-	cargo run -p client_gui
+test:
+	cargo test --workspace
 
 lint:
 	cargo clippy --workspace -- -D warnings
@@ -17,4 +22,4 @@ lint:
 clean:
 	cargo clean
 
-.PHONY: install run-server run-client run-client-gui lint clean
+.PHONY: install run-server run-client run-client-gui lint clean test

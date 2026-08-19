@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
 pub struct Room {
+    #[allow(dead_code)]
     pub id: String,
     pub name: String,
     pub description: String,

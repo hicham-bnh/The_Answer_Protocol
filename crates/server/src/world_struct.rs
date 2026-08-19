@@ -13,6 +13,7 @@ pub struct Location {
 #[derive(Debug, Deserialize)]
 pub struct Item {
     pub name: String,
+    #[allow(dead_code)]
     pub description: String,
     pub obtainable: bool,
 }
@@ -20,8 +21,10 @@ pub struct Item {
 #[derive(Debug, Deserialize)]
 pub struct Npc {
     pub name: String,
+    #[allow(dead_code)]
     pub role: String,
     pub hostile: bool,
+    #[allow(dead_code)]
     pub description: String,
     pub dialogue: Vec<String>,
     #[serde(default)]
@@ -44,8 +47,10 @@ pub struct Stats {
 #[derive(Debug, Deserialize)]
 pub struct Quest {
     pub name: String,
+    #[allow(dead_code)]
     pub giver: String,
     #[serde(rename = "type")]
+    #[allow(dead_code)]
     pub quest_type: String,
     pub description: String,
     pub objective: Objective,
@@ -57,6 +62,7 @@ pub struct Objective {
     #[serde(default)]
     pub item: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub deliver_to: Option<String>,
     #[serde(default)]
     pub target: Option<String>,

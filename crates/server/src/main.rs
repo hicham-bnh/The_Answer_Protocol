@@ -9,9 +9,7 @@ use std::time::Instant;
 mod protocol {
     pub mod command;
 }
-mod world_struct {
-    pub mod world_struct;
-}
+pub mod world_struct;
 
 pub struct Player {
     pub stream: Mutex<TcpStream>,
@@ -30,11 +28,11 @@ pub struct Player {
     pub invite_from: Option<String>,
     pub dialogue_progress: HashMap<String, usize>,
     pub command: u32,
-    pub time_command: Instant
+    pub time_command: Instant,
 }
 
 use protocol::command::{connect_user, disconnect_player, log, parse_command};
-use world_struct::world_struct::GameWorld;
+use world_struct::GameWorld;
 
 fn parse_world() -> GameWorld {
     let world = fs::read_to_string("config/world.yaml").expect("Impossible de lire world.yaml");

@@ -43,7 +43,10 @@ fn main() {
             continue;
         }
         println!(">> {cmd}");
-        if write_stream.write_all(format!("{cmd}\n").as_bytes()).is_err() {
+        if write_stream
+            .write_all(format!("{cmd}\n").as_bytes())
+            .is_err()
+        {
             eprintln!("(connection lost)");
             break;
         }
