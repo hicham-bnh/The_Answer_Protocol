@@ -1,25 +1,14 @@
-# world.yaml — Monde de travail temporaire (RPG vanilla)
-# Conforme aux exigences du sujet TAP :
-#   - 9 pièces interconnectées formant une boucle + 1 branche optionnelle (la crypte)
-#   - 4 PNJ, 3 rôles distincts : dialogue (guard), donneur de quête (elder, blacksmith), ennemi (goblin)
-#   - 5 objets, dont 3 obtenables en jeu (herbs, sword, mushroom)
-#   - 2 quêtes : fetch (rapporter des herbes) et kill (tuer le gobelin)
-#
-# Plan de la carte :
-#
 #            [tavern]
 #               |
 #   [forge] - [square] - [market]
 #      |         |          |
 #   [gate] -- [road] --- [forest]
 #                |
-#             [cave] --- [crypt]   <- crypt = branche optionnelle (cul-de-sac)
-#
-# Boucle principale : square -> market -> forest -> road -> gate -> forge -> square
+#             [cave] --- [crypt]
 
 world:
-  start_location: "loc.square"     # pièce d'apparition des joueurs
-  respawn_location: "loc.square"   # pièce de respawn après une mort (0 HP)
+  start_location: "loc.square"
+  respawn_location: "loc.square"
 
   locations:
     loc.square:
@@ -97,7 +86,6 @@ world:
       items: ["item.mushroom"]
       npcs: ["npc.goblin"]
 
-    # Branche optionnelle (cul-de-sac) exigée par le sujet
     loc.crypt:
       name: "Forgotten Crypt"
       description: "Ancient tombs covered in dust. Nobody has set foot here in decades."
@@ -127,14 +115,22 @@ items:
     description: "A cold mug of the tavern's finest ale."
     obtainable: true
 
-  # Objet non obtenable : décor interactif (LOOK le montre, TAKE doit échouer)
+  item.strong_ale:
+    name: "Strong Ale"
+    description: "A very strong ale gifted by the elder."
+    obtainable: true
+
   item.ancient_altar:
     name: "Ancient Altar"
     description: "A massive stone altar carved with unreadable runes. Far too heavy to move."
     obtainable: false
 
+  item.shield:
+    name: "Iron Shield"
+    description: "A robust shield rewarded for defeating the goblin."
+    obtainable: true
+
 npcs:
-  # Rôle 1 : dialogue simple
   npc.guard:
     name: "Village Guard"
     role: "dialogue"
@@ -147,7 +143,6 @@ npcs:
     stats:
       hp: 50
 
-  # Rôle 2 : donneur de quête (fetch)
   npc.elder:
     name: "Village Elder"
     role: "quest_giver"
@@ -160,7 +155,6 @@ npcs:
     stats:
       hp: 30
 
-  # Rôle 2 bis : donneur de quête (kill)
   npc.blacksmith:
     name: "Blacksmith"
     role: "quest_giver"
@@ -173,7 +167,6 @@ npcs:
     stats:
       hp: 60
 
-  # Rôle 3 : ennemi
   npc.goblin:
     name: "Cave Goblin"
     role: "enemy"
@@ -183,11 +176,10 @@ npcs:
       - "Grrr! Mine! All mine!"
     stats:
       hp: 30
-      damage: 8        # dégâts de sa contre-attaque
-    respawn_seconds: 60  # réapparaît après sa mort (à ajuster selon vos choix de design)
+      damage: 8
+    respawn_seconds: 60
 
 quests:
-  # Quête 1 : fetch item (aller chercher un objet et le rapporter)
   quest.fetch_herbs:
     name: "Herbs for the Elder"
     giver: "npc.elder"
@@ -197,9 +189,8 @@ quests:
       item: "item.herbs"
       deliver_to: "npc.elder"
     reward:
-      item: "item.ale"   # l'elder vous offre une bière, quête vanilla oblige
+      item: "item.strong_ale"
 
-  # Quête 2 : defeat NPC (tuer un ennemi)
   quest.slay_goblin:
     name: "Goblin Trouble"
     giver: "npc.blacksmith"
@@ -209,4 +200,4 @@ quests:
       target: "npc.goblin"
       count: 1
     reward:
-      item: "item.sword"
+      item: "item.shield"

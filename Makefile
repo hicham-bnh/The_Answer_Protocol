@@ -1,7 +1,5 @@
-.PHONY: install run-server run-client run-client-gui lint clean
-
 install:
-	cargo check
+	cargo install
 
 run-server:
 	cargo run -p server
@@ -18,3 +16,5 @@ lint:
 
 clean:
 	cargo clean
+
+.PHONY: install run-server run-client run-client-gui lint clean

@@ -1,4 +1,6 @@
-use crate::protocol::{EvtType, LookReply, ServerMsg, StatusReply, TalkReply, WhoReply, CombatReply};
+use crate::protocol::{
+    CombatReply, EvtType, LookReply, QuestReply, ServerMsg, StatusReply, TalkReply, WhoReply,
+};
 use crate::state::{prettify, ChatTab, Room};
 use eframe::egui;
 use std::collections::VecDeque;
@@ -24,6 +26,7 @@ pub struct TapClient {
     combat_target_hp: u32,
     combat_target_max_hp: u32,
     combat_history: Vec<String>,
+    quests: Vec<QuestReply>,
     chat_global: Vec<String>,
     chat_room: Vec<String>,
     chat_group: Vec<String>,
@@ -57,6 +60,7 @@ impl TapClient {
             combat_target_hp: 0,
             combat_target_max_hp: 0,
             combat_history: Vec::new(),
+            quests: Vec::new(),
             chat_global: Vec::new(),
             chat_room: Vec::new(),
             chat_group: Vec::new(),
@@ -114,12 +118,13 @@ impl TapClient {
 
         egui::Panel::top("main_panel").show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.heading(
-                    egui::RichText::new(format!(
-                        "{}'s HP: {}/{}",
-                        self.username, self.hp, self.max_hp
-                    ))
-                    .size(21.0),
+                ui.heading(egui::RichText::new(&self.username).size(21.0));
+                let max_hp = self.max_hp.max(1);
+                ui.add(
+                    egui::ProgressBar::new(self.hp as f32 / max_hp as f32)
+                        .desired_width(220.0)
+                        .fill(egui::Color32::from_rgb(60, 140, 60))
+                        .text(format!("{} / {} HP", self.hp, self.max_hp)),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.heading(format!("{} player(s) online", self.server_players));
@@ -174,34 +179,62 @@ impl TapClient {
             .default_size(300.0)
             .show(ui, |ui| {
                 if self.in_combat {
-                    ui.label(egui::RichText::new("COMBAT").size(22.0));
-                    ui.add_space(8.0);
+                    ui.add_space(16.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(egui::RichText::new("COMBAT").size(26.0).strong());
+                    });
+                    ui.add_space(16.0);
+
                     let target = self.combat_target.as_deref().unwrap_or("Unknown");
-                    ui.label(egui::RichText::new(prettify(target)).size(18.0));
-                    ui.label(format!(
-                        "Enemy HP: {}/{}",
-                        self.combat_target_hp, self.combat_target_max_hp
-                    ));
+                    ui.vertical_centered(|ui| {
+                        ui.label(egui::RichText::new(prettify(target)).size(20.0).strong());
+                    });
+                    ui.add_space(6.0);
+                    let max_hp = self.combat_target_max_hp.max(1);
+                    ui.add(
+                        egui::ProgressBar::new(self.combat_target_hp as f32 / max_hp as f32)
+                            .fill(egui::Color32::from_rgb(170, 55, 55))
+                            .text(format!(
+                                "{} / {} HP",
+                                self.combat_target_hp, self.combat_target_max_hp
+                            )),
+                    );
+
+                    ui.add_space(14.0);
                     ui.separator();
+                    ui.add_space(12.0);
+
+                    ui.vertical_centered(|ui| {
+                        ui.horizontal(|ui| {
+                            for action in ["ATTACK", "DEFEND", "FLEE"] {
+                                if ui
+                                    .add_sized(
+                                        [82.0, 34.0],
+                                        egui::Button::new(egui::RichText::new(action).size(16.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    pending = Some(action.to_string());
+                                }
+                                ui.add_space(6.0);
+                            }
+                        });
+                    });
+
+                    ui.add_space(12.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
                     egui::ScrollArea::vertical()
                         .stick_to_bottom(true)
-                        .max_height(350.0)
+                        .max_height(300.0)
                         .show(ui, |ui| {
                             for line in &self.combat_history {
                                 ui.label(line);
+                                ui.add_space(4.0);
                             }
                         });
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        for action in ["ATTACK", "DEFEND", "FLEE"] {
-                            if ui
-                                .button(egui::RichText::new(action).size(18.0))
-                                .clicked()
-                            {
-                                pending = Some(action.to_string());
-                            }
-                        }
-                    });
+                    ui.add_space(8.0);
                 } else if let Some(room) = &self.room {
                     ui.label(egui::RichText::new(&room.name).size(20.0));
                     ui.label(format!("{} player(s) in this room", self.players.len()));
@@ -224,6 +257,10 @@ impl TapClient {
 
                     ui.label(egui::RichText::new("Players here:").size(20.0));
                     for player in &self.players {
+                        if player.to_string() == self.username {
+                            ui.label(player.to_owned() + " (You)");
+                            continue;
+                        }
                         ui.horizontal(|ui| {
                             ui.label(player);
                             if ui
@@ -285,6 +322,27 @@ impl TapClient {
                         }
                     });
                 }
+
+                ui.separator();
+
+                ui.label(egui::RichText::new("Quests: ").size(20.0));
+                ui.add_space(4.0);
+                if self.quests.is_empty() {
+                    ui.label(egui::RichText::new("No active quest").weak());
+                }
+                for quest in &self.quests {
+                    let title = quest
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| prettify(&quest.quest_id));
+                    ui.label(
+                        egui::RichText::new(format!("{} ({})", title, quest.progress)).strong(),
+                    );
+                    if let Some(desc) = &quest.description {
+                        ui.label(egui::RichText::new(desc).weak());
+                    }
+                    ui.add_space(6.0);
+                }
             });
         if let Some(cmd) = pending {
             self.send_command(cmd);
@@ -293,11 +351,13 @@ impl TapClient {
 
     fn right_panel(&mut self, ui: &mut egui::Ui) {
         egui::Panel::right("log_list").show(ui, |ui| {
-            egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
-                for log in &self.logs {
-                    ui.label(format!("- {}", log));
-                }
-            });
+            egui::ScrollArea::vertical()
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    for log in &self.logs {
+                        ui.label(format!("- {}", log));
+                    }
+                });
         });
     }
 
@@ -377,7 +437,6 @@ impl TapClient {
                     let first_word = cmd_splitter.next().unwrap_or("");
 
                     match first_word {
-
                         "CONNECT" => {
                             if data == "connected" {
                                 self.connected = true;
@@ -508,62 +567,100 @@ impl TapClient {
                         "TALK" => match serde_json::from_str::<TalkReply>(&data) {
                             Ok(s) => self
                                 .chat_room
-                                .push(format!("[NPC DIALOGUE] {}: {}", s.npc, s.dialogue)),
+                                .push(format!("[NPC DIALOGUE] {}: {}", prettify(&s.npc), s.dialogue)),
                             Err(_) => self.logs.push(format!("Unexpected reply to TALK: {data}")),
                         },
 
                         "INVENTORY" => match serde_json::from_str::<Vec<String>>(&data) {
                             Ok(s) => self.inventory = s,
-                            Err(_) => self.logs.push(format!("Unexpected reply to INVENTORY: {data}")),
+                            Err(_) => self
+                                .logs
+                                .push(format!("Unexpected reply to INVENTORY: {data}")),
                         },
 
-                        w @ ("ATTACK" | "DEFEND" | "FLEE") => match serde_json::from_str::<CombatReply>(&data){
-                            Ok(s) => {
-                                match cmd_splitter.next() {
-                                    Some(ennemy_name) => {
-                                        if self.in_combat {
-                                            self.logs.push(format!("Unexpected reply to {w}: {data} (already in a fight)"))
-                                        } else {
-                                            self.in_combat = true;
-                                            self.combat_target = Some(ennemy_name.to_string());
-                                            self.hp = s.attacker_hp;
-                                            self.combat_target_hp = s.target_hp;
-                                            self.combat_target_max_hp = s.target_hp;
-                                            if let Some(combat_log) = s.message {
-                                                self.combat_history.push(combat_log);
+                        w @ ("ATTACK" | "DEFEND" | "FLEE") => {
+                            match serde_json::from_str::<CombatReply>(&data) {
+                                Ok(s) => {
+                                    match cmd_splitter.next() {
+                                        Some(ennemy_name) => {
+                                            if self.in_combat {
+                                                self.logs.push(format!("Unexpected reply to {w}: {data} (already in a fight)"))
+                                            } else {
+                                                self.in_combat = true;
+                                                self.combat_target = Some(ennemy_name.to_string());
+                                                self.hp = s.attacker_hp;
+                                                self.combat_target_hp = s.target_hp;
+                                                self.combat_target_max_hp = s.target_hp;
+                                                if let Some(combat_log) = s.message {
+                                                    self.combat_history.push(combat_log);
+                                                }
                                             }
                                         }
-                                    },
-                                    None => {
-                                        if !self.in_combat {
-                                            self.logs.push(format!("Unexpected reply to {w}: {data} (not in a fight)"))
-                                        } else {
-                                            match s.status.as_str() {
-                                                "in_combat" => {
-                                                    self.hp = s.attacker_hp;
-                                                    self.combat_target_hp = s.target_hp;
-                                                    self.combat_history.push(format!("Inflicted {} to {}, counter attacked for {}", s.damage_dealt, self.combat_target.as_deref().unwrap_or("Unknown"), s.damage_taken))
-                                                },
-                                                "won" | "fled" | "dead" => {
-                                                    self.in_combat = false;
-                                                    self.combat_target = None;
-                                                    self.combat_target_hp = 0;
-                                                    self.combat_target_max_hp = 0;
-                                                    self.combat_history.push(s.message.unwrap_or_else(|| "Combat ended".to_string()));
-                                                    self.send_command("LOOK".to_string());
-                                                    self.send_command("STATUS".to_string());
+                                        None => {
+                                            if !self.in_combat {
+                                                self.logs.push(format!("Unexpected reply to {w}: {data} (not in a fight)"))
+                                            } else {
+                                                match s.status.as_str() {
+                                                    "in_combat" => {
+                                                        self.hp = s.attacker_hp;
+                                                        self.combat_target_hp = s.target_hp;
+                                                        self.combat_history.push(format!("Inflicted {} to {}, counter attacked for {}", s.damage_dealt, self.combat_target.as_deref().unwrap_or("Unknown"), s.damage_taken))
+                                                    }
+                                                    "won" | "fled" | "dead" => {
+                                                        self.in_combat = false;
+                                                        self.combat_target = None;
+                                                        self.combat_target_hp = 0;
+                                                        self.combat_target_max_hp = 0;
+                                                        self.combat_history.push(
+                                                            s.message.unwrap_or_else(|| {
+                                                                "Combat ended".to_string()
+                                                            }),
+                                                        );
+                                                        self.send_command("LOOK".to_string());
+                                                        self.send_command("STATUS".to_string());
+                                                    }
+                                                    _ => self.logs.push(format!(
+                                                        "Unexpected reply to {w}: {data}"
+                                                    )),
                                                 }
-                                                _ => self.logs.push(format!("Unexpected reply to {w}: {data}")),
                                             }
                                         }
                                     }
-                                } 
-                            },
-                            
-                            Err(_) => self.logs.push(format!("Unexpected reply to {w}: {data}")),
+                                }
+
+                                Err(_) => {
+                                    self.logs.push(format!("Unexpected reply to {w}: {data}"))
+                                }
+                            }
                         }
 
-                        "QUEST" => self.logs.push("Need to implement QUEST command".to_string()),
+                        "QUESTS" => match serde_json::from_str::<Vec<QuestReply>>(&data) {
+                            Ok(s) => self.quests = s,
+                            Err(_) => self
+                                .logs
+                                .push(format!("Unexpected reply to QUESTS: {data}")),
+                        },
+
+                        "QUEST" => match cmd_splitter.next() {
+                            Some(_) => match serde_json::from_str::<QuestReply>(&data) {
+                                Ok(s) => {
+                                    if s.status == "completed" {
+                                        self.send_command("INVENTORY".to_string());
+                                    }
+                                    if let Some(index) =
+                                        self.quests.iter().position(|q| q.quest_id == s.quest_id)
+                                    {
+                                        self.quests[index] = s;
+                                    } else {
+                                        self.quests.push(s);
+                                    }
+                                }
+                                Err(_) => {
+                                    self.logs.push(format!("Unexpected reply to QUEST: {data}"))
+                                }
+                            },
+                            None => self.logs.push(format!("Unexpected reply to QUEST: {data}")),
+                        },
 
                         "QUIT" => {
                             if data != "bye" {
@@ -575,9 +672,18 @@ impl TapClient {
 
                         _ => self.logs.push(format!("OK to '{cmd}': {data}")),
                     }
+                    if first_word != "QUESTS" && !self.in_combat {
+                        self.send_command("QUESTS".to_string());
+                    }
                 }
 
-                None => self.logs.push(format!("Unsolicited OK: {data}")),
+                None => {
+                    if data.starts_with("hello proto=") {
+                        self.logs.push("Server's greeting".to_string())
+                    } else {
+                        self.logs.push(format!("Unsolicited OK: {data}"))
+                    }
+                }
             },
 
             ServerMsg::Err(code, description) => {
@@ -595,7 +701,9 @@ impl TapClient {
                                     .push(format!("ERR to '{cmd}': {code} {description}"));
                             }
                         }
-                        None => self.logs.push(format!("Unsolicited ERR: {code} {description}")),
+                        None => self
+                            .logs
+                            .push(format!("Unsolicited ERR: {code} {description}")),
                     }
                 }
             }

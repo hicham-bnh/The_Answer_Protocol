@@ -11,8 +11,8 @@ mod state;
 fn main() -> eframe::Result {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 || args[1].parse::<SocketAddr>().is_err() {
-    	eprintln!("Bad arguments, usage: client_gui <ip:port>, no localhost is allowed.");
-     std::process::exit(1);
+        eprintln!("Bad arguments, usage: client_gui <ip:port>, no localhost is allowed.");
+        std::process::exit(1);
     }
     let addr = args[1].clone();
     let (tx, rx) = mpsc::channel::<String>();
@@ -29,9 +29,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             net::start(addr.clone().to_string(), tx, rx_out, cc.egui_ctx.clone());
-            // Ok(Box::new(TapClient::fake(rx, tx_out)))
             Ok(Box::new(TapClient::new(addr, rx, tx_out)))
-        })
+        }),
     )
 }
-
