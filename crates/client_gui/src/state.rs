@@ -18,7 +18,7 @@ pub enum ChatTab {
 }
 
 pub fn prettify(id: &str) -> String {
-    for prefix in ["loc.", "item.", "npc."] {
+    for prefix in ["loc.", "item.", "npc.", "quest."] {
         if let Some(rest) = id.strip_prefix(prefix) {
             return rest.replace("_", " ");
         }

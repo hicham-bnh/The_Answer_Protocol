@@ -189,7 +189,7 @@ quests:
       item: "item.herbs"
       deliver_to: "npc.elder"
     reward:
-      item: "item.ale"
+      item: "item.strong_ale"
 
   quest.slay_goblin:
     name: "Goblin Trouble"

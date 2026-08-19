@@ -30,8 +30,6 @@ pub struct Npc {
     #[serde(default)]
     pub respawn_seconds: Option<u32>,
     pub engaged_by: Option<String>,
-    #[serde(default, skip_deserializing)]
-    pub dialogue_index: usize,
 }
 
 #[derive(Debug, Deserialize)]

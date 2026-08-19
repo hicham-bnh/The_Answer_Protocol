@@ -196,6 +196,7 @@ pub fn connect_user(
                 target_npc: None,
                 group: None,
                 invite_from: None,
+                dialogue_progress: HashMap::new(),
             };
             guard.insert(name.clone(), player);
             let _ = stream.write_all(b"OK connected\n");
@@ -738,10 +739,18 @@ pub fn parse_command(
                 return;
             };
 
-            let dialogue = match w.npcs.get_mut(&npc_id) {
+            let dialogue = match w.npcs.get(&npc_id) {
                 Some(n) if !n.dialogue.is_empty() => {
-                    let idx = n.dialogue_index % n.dialogue.len();
-                    n.dialogue_index = n.dialogue_index.wrapping_add(1);
+                    let mut guard = players.lock().unwrap();
+                    let idx = match guard.get_mut(name) {
+                        Some(p) => {
+                            let counter = p.dialogue_progress.entry(npc_id.clone()).or_insert(0);
+                            let idx = *counter % n.dialogue.len();
+                            *counter = counter.wrapping_add(1);
+                            idx
+                        }
+                        None => 0,
+                    };
                     Some(n.dialogue[idx].clone())
                 }
                 _ => None,

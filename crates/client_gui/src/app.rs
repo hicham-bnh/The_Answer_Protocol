@@ -567,7 +567,7 @@ impl TapClient {
                         "TALK" => match serde_json::from_str::<TalkReply>(&data) {
                             Ok(s) => self
                                 .chat_room
-                                .push(format!("[NPC DIALOGUE] {}: {}", s.npc, s.dialogue)),
+                                .push(format!("[NPC DIALOGUE] {}: {}", prettify(&s.npc), s.dialogue)),
                             Err(_) => self.logs.push(format!("Unexpected reply to TALK: {data}")),
                         },
 

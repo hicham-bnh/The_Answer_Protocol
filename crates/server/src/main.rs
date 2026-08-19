@@ -27,6 +27,7 @@ pub struct Player {
     pub target_npc: Option<String>,
     pub group: Option<String>,
     pub invite_from: Option<String>,
+    pub dialogue_progress: HashMap<String, usize>,
 }
 
 use protocol::command::{connect_user, disconnect_player, log, parse_command};
