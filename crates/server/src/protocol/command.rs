@@ -311,15 +311,14 @@ pub fn parse_command(
     {
         let mut guard = players.lock().unwrap();
         if let Some(player) = guard.get_mut(name) {
-            if player.time_command.elapsed() >= Duration::from_secs(10) {
+            if player.time_command.elapsed() >= Duration::from_secs(5) {
                 player.command = 0;
                 player.time_command = Instant::now();
             }
-            else if player.command > 30 {
+            else if player.command > 100 {
                 log("WARN", "flood_detected", json!({"player": name, "count": &player.command}));
                 player.command = 0;
                 player.time_command = Instant::now();
-                return ;
             }
             player.command += 1;
         }
