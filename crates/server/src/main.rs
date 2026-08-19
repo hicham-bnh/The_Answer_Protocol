@@ -4,6 +4,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 mod protocol {
     pub mod command;
@@ -28,6 +29,8 @@ pub struct Player {
     pub group: Option<String>,
     pub invite_from: Option<String>,
     pub dialogue_progress: HashMap<String, usize>,
+    pub command: u32,
+    pub time_command: Instant
 }
 
 use protocol::command::{connect_user, disconnect_player, log, parse_command};
