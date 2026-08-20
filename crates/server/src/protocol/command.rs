@@ -256,9 +256,21 @@ pub fn leave_group(name: &str, players: &Arc<Mutex<HashMap<String, Player>>>) {
     }
 }
 
-pub fn disconnect_player(name: &str, players: &Arc<Mutex<HashMap<String, Player>>>) {
+pub fn disconnect_player(
+    name: &str,
+    players: &Arc<Mutex<HashMap<String, Player>>>,
+    world: &Arc<Mutex<GameWorld>>,
+) {
     if name.is_empty() {
         return;
+    }
+    {
+        let mut w = world.lock().unwrap();
+        for npc in w.npcs.values_mut() {
+            if npc.engaged_by.as_deref() == Some(name) {
+                npc.engaged_by = None;
+            }
+        }
     }
     let room = {
         let mut guard = players.lock().unwrap();
