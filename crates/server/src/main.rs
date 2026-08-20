@@ -1,5 +1,5 @@
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
@@ -131,6 +131,71 @@ fn validate_world(w: &GameWorld) {
             ));
         }
     }
+    let mut names: HashMap<&str, Vec<&String>> = HashMap::new();
+    for (id, item) in &w.items {
+        names.entry(item.name.as_str()).or_default().push(id);
+    }
+    for (name, ids) in &names {
+        if ids.len() > 1 {
+            errors.push(format!(
+                "display name '{name}' is shared by several items: {ids:?}"
+            ));
+        }
+    }
+    let mut names: HashMap<&str, Vec<&String>> = HashMap::new();
+    for (id, npc) in &w.npcs {
+        names.entry(npc.name.as_str()).or_default().push(id);
+    }
+    for (name, ids) in &names {
+        if ids.len() > 1 {
+            errors.push(format!(
+                "display name '{name}' is shared by several npcs: {ids:?}"
+            ));
+        }
+    }
+
+    if w.world.locations.contains_key(&w.world.start_location) {
+        let mut seen: HashSet<&String> = HashSet::new();
+        let mut queue: VecDeque<&String> = VecDeque::new();
+        queue.push_back(&w.world.start_location);
+        while let Some(id) = queue.pop_front() {
+            if !seen.insert(id) {
+                continue;
+            }
+            if let Some(loc) = w.world.locations.get(id) {
+                for dest in loc.exits.values() {
+                    if w.world.locations.contains_key(dest) {
+                        queue.push_back(dest);
+                    }
+                }
+            }
+        }
+        for id in w.world.locations.keys() {
+            if !seen.contains(id) {
+                errors.push(format!(
+                    "room '{id}' cannot be reached from '{}'",
+                    w.world.start_location
+                ));
+            }
+        }
+    }
+
+    let mut edges: HashSet<(&String, &String)> = HashSet::new();
+    for (id, loc) in &w.world.locations {
+        for dest in loc.exits.values() {
+            if id != dest && w.world.locations.contains_key(dest) {
+                let pair = if id < dest { (id, dest) } else { (dest, id) };
+                edges.insert(pair);
+            }
+        }
+    }
+    if !w.world.locations.is_empty() && edges.len() < w.world.locations.len() {
+        errors.push(
+            "world map has no loop: a full circuit must be possible (line-only maps are not allowed)"
+                .to_string(),
+        );
+    }
+
     if !errors.is_empty() {
         eprintln!("world.yaml validation failed:");
         for e in &errors {

@@ -1173,7 +1173,6 @@ mod tests {
             r#"OK {"quest_id":"quest.a","name":"A","description":"da","status":"in_progress","progress":"0/1"}"#,
         );
         assert_eq!(c.quests.len(), 1);
-        c.pending_cmds.clear();
         feed(
             &mut c,
             "QUEST npc.elder",
