@@ -257,7 +257,7 @@ impl TapClient {
 
                     ui.label(egui::RichText::new("Players here:").size(20.0));
                     for player in &self.players {
-                        if player.to_string() == self.username {
+                        if *player == self.username {
                             ui.label(player.to_owned() + " (You)");
                             continue;
                         }
@@ -565,9 +565,11 @@ impl TapClient {
                         },
 
                         "TALK" => match serde_json::from_str::<TalkReply>(&data) {
-                            Ok(s) => self
-                                .chat_room
-                                .push(format!("[NPC DIALOGUE] {}: {}", prettify(&s.npc), s.dialogue)),
+                            Ok(s) => self.chat_room.push(format!(
+                                "[NPC DIALOGUE] {}: {}",
+                                prettify(&s.npc),
+                                s.dialogue
+                            )),
                             Err(_) => self.logs.push(format!("Unexpected reply to TALK: {data}")),
                         },
 
@@ -766,8 +768,9 @@ mod tests {
         assert_eq!(out.try_recv().unwrap(), "LOOK");
         assert_eq!(out.try_recv().unwrap(), "INVENTORY");
         assert_eq!(out.try_recv().unwrap(), "STATUS");
+        assert_eq!(out.try_recv().unwrap(), "QUESTS");
         assert!(out.try_recv().is_err());
-        assert_eq!(c.pending_cmds.len(), 3);
+        assert_eq!(c.pending_cmds.len(), 4);
     }
 
     #[test]
@@ -775,7 +778,7 @@ mod tests {
         let (mut c, _out) = client();
         feed(&mut c, "CONNECT test", "OK weird");
         assert!(!c.connected);
-        assert!(last_log(&c).contains("CONNECT"));
+        assert!(c.logs.iter().any(|l| l.contains("CONNECT")));
     }
 
     #[test]
@@ -795,7 +798,7 @@ mod tests {
         let (mut c, _out) = client();
         feed(&mut c, "STATUS", r#"OK {"hp": "abc"}"#);
         assert_eq!(c.hp, 100);
-        assert!(last_log(&c).contains("STATUS"));
+        assert!(c.logs.iter().any(|l| l.contains("STATUS")));
     }
 
     #[test]
@@ -838,7 +841,7 @@ mod tests {
             r#"OK {"players": [], "items": [], "npcs": []}"#,
         );
         assert!(c.room.is_none());
-        assert!(last_log(&c).contains("LOOK"));
+        assert!(c.logs.iter().any(|l| l.contains("LOOK")));
     }
 
     #[test]
@@ -887,15 +890,18 @@ mod tests {
         let (mut c, out) = client();
         feed(&mut c, "MOVE north", "OK room=loc.tavern");
         assert_eq!(out.try_recv().unwrap(), "LOOK");
-        assert_eq!(c.pending_cmds.len(), 1);
+        assert_eq!(out.try_recv().unwrap(), "QUESTS");
+        assert!(out.try_recv().is_err());
+        assert_eq!(c.pending_cmds.len(), 2);
     }
 
     #[test]
     fn move_unexpected_reply_is_logged() {
         let (mut c, out) = client();
         feed(&mut c, "MOVE north", "OK nonsense");
+        assert!(c.logs.iter().any(|l| l.contains("MOVE")));
+        assert_eq!(out.try_recv().unwrap(), "QUESTS");
         assert!(out.try_recv().is_err());
-        assert!(last_log(&c).contains("MOVE"));
     }
 
     #[test]
@@ -956,15 +962,19 @@ mod tests {
         assert!(last_log(&c).contains("STATUS"));
         c.apply(parse_line(r#"OK ["item.x"]"#));
         assert_eq!(c.inventory, vec!["item.x"]);
-        assert!(c.pending_cmds.is_empty());
+        assert_eq!(c.pending_cmds.len(), 1);
+        assert_eq!(c.pending_cmds.front().map(|s| s.as_str()), Some("QUESTS"));
     }
 
     #[test]
     fn unsolicited_ok_is_logged_not_crashing() {
-        let (mut c, _out) = client();
+        let (mut c, out) = client();
         c.apply(parse_line("OK hello proto=1"));
+        assert!(last_log(&c).to_lowercase().contains("greeting"));
+        c.apply(parse_line("OK whatever"));
         assert!(last_log(&c).to_lowercase().contains("unsolicited"));
         assert!(c.pending_cmds.is_empty());
+        assert!(out.try_recv().is_err());
     }
 
     #[test]
@@ -1018,5 +1028,232 @@ mod tests {
         assert!(last_log(&c).contains("GARBAGE stuff"));
         assert!(c.pending_cmds.is_empty());
         assert!(!c.connected);
+    }
+
+    #[test]
+    fn attack_engage_enters_combat() {
+        let (mut c, out) = client();
+        feed(
+            &mut c,
+            "ATTACK npc.goblin",
+            r#"OK {"action":"engage","attacker_hp":100,"target_hp":20,"damage_dealt":0,"damage_taken":0,"status":"in_combat","message":"combat started with npc.goblin"}"#,
+        );
+        assert!(c.in_combat);
+        assert_eq!(c.combat_target.as_deref(), Some("npc.goblin"));
+        assert_eq!(c.combat_target_hp, 20);
+        assert_eq!(c.combat_target_max_hp, 20);
+        assert!(c.combat_history.last().unwrap().contains("combat started"));
+        assert!(out.try_recv().is_err());
+    }
+
+    #[test]
+    fn attack_round_updates_hps_and_history() {
+        let (mut c, out) = client();
+        c.in_combat = true;
+        c.combat_target = Some("npc.goblin".to_string());
+        c.combat_target_hp = 20;
+        c.combat_target_max_hp = 20;
+        feed(
+            &mut c,
+            "ATTACK",
+            r#"OK {"action":"attack","attacker_hp":85,"target_hp":5,"damage_dealt":15,"damage_taken":8,"status":"in_combat","message":null}"#,
+        );
+        assert!(c.in_combat);
+        assert_eq!(c.hp, 85);
+        assert_eq!(c.combat_target_hp, 5);
+        let line = c.combat_history.last().unwrap();
+        assert!(line.contains("15"));
+        assert!(line.contains("8"));
+        assert!(out.try_recv().is_err());
+    }
+
+    #[test]
+    fn combat_won_exits_and_resyncs() {
+        let (mut c, out) = client();
+        c.in_combat = true;
+        c.combat_target = Some("npc.goblin".to_string());
+        feed(
+            &mut c,
+            "ATTACK",
+            r#"OK {"action":"attack","attacker_hp":85,"target_hp":0,"damage_dealt":15,"damage_taken":0,"status":"won","message":"you won the fight"}"#,
+        );
+        assert!(!c.in_combat);
+        assert!(c.combat_target.is_none());
+        assert!(c
+            .combat_history
+            .last()
+            .unwrap()
+            .contains("you won the fight"));
+        assert_eq!(out.try_recv().unwrap(), "LOOK");
+        assert_eq!(out.try_recv().unwrap(), "STATUS");
+        assert_eq!(out.try_recv().unwrap(), "QUESTS");
+        assert!(out.try_recv().is_err());
+    }
+
+    #[test]
+    fn combat_dead_exits_and_resyncs() {
+        let (mut c, out) = client();
+        c.in_combat = true;
+        c.combat_target = Some("npc.goblin".to_string());
+        feed(
+            &mut c,
+            "DEFEND",
+            r#"OK {"action":"defend","attacker_hp":0,"target_hp":12,"damage_dealt":0,"damage_taken":9,"status":"dead","message":"you died, respawned in loc.square with 50 hp"}"#,
+        );
+        assert!(!c.in_combat);
+        assert!(c.combat_history.last().unwrap().contains("respawned"));
+        assert_eq!(out.try_recv().unwrap(), "LOOK");
+        assert_eq!(out.try_recv().unwrap(), "STATUS");
+        assert_eq!(out.try_recv().unwrap(), "QUESTS");
+    }
+
+    #[test]
+    fn flee_exits_combat() {
+        let (mut c, out) = client();
+        c.in_combat = true;
+        c.combat_target = Some("npc.goblin".to_string());
+        feed(
+            &mut c,
+            "FLEE",
+            r#"OK {"action":"flee","attacker_hp":70,"target_hp":0,"damage_dealt":0,"damage_taken":0,"status":"fled","message":"you fled the combat"}"#,
+        );
+        assert!(!c.in_combat);
+        assert!(c.combat_target.is_none());
+        assert!(c.combat_history.last().unwrap().contains("fled"));
+        assert_eq!(out.try_recv().unwrap(), "LOOK");
+    }
+
+    #[test]
+    fn engage_while_already_in_combat_is_logged() {
+        let (mut c, _out) = client();
+        c.in_combat = true;
+        c.combat_target = Some("npc.goblin".to_string());
+        feed(
+            &mut c,
+            "ATTACK npc.wolf",
+            r#"OK {"action":"engage","attacker_hp":90,"target_hp":30,"damage_dealt":0,"damage_taken":0,"status":"in_combat","message":"combat started with npc.wolf"}"#,
+        );
+        assert_eq!(c.combat_target.as_deref(), Some("npc.goblin"));
+        assert!(last_log(&c).contains("already in a fight"));
+    }
+
+    #[test]
+    fn combat_malformed_json_is_logged() {
+        let (mut c, _out) = client();
+        c.in_combat = true;
+        feed(&mut c, "ATTACK", r#"OK {"action": 12}"#);
+        assert!(last_log(&c).contains("ATTACK"));
+    }
+
+    #[test]
+    fn quests_reply_replaces_list() {
+        let (mut c, out) = client();
+        feed(
+            &mut c,
+            "QUESTS",
+            r#"OK [{"quest_id":"quest.a","name":"A","description":"da","status":"in_progress","progress":"0/3"},{"quest_id":"quest.b","name":"B","description":"db","status":"completed","progress":"done"}]"#,
+        );
+        assert_eq!(c.quests.len(), 2);
+        feed(
+            &mut c,
+            "QUESTS",
+            r#"OK [{"quest_id":"quest.a","name":"A","description":"da","status":"in_progress","progress":"1/3"}]"#,
+        );
+        assert_eq!(c.quests.len(), 1);
+        assert_eq!(c.quests[0].progress, "1/3");
+        assert!(out.try_recv().is_err());
+    }
+
+    #[test]
+    fn quest_reply_upserts_by_id() {
+        let (mut c, _out) = client();
+        feed(
+            &mut c,
+            "QUEST npc.elder",
+            r#"OK {"quest_id":"quest.a","name":"A","description":"da","status":"in_progress","progress":"0/1"}"#,
+        );
+        assert_eq!(c.quests.len(), 1);
+        c.pending_cmds.clear();
+        feed(
+            &mut c,
+            "QUEST npc.elder",
+            r#"OK {"quest_id":"quest.a","name":"A","description":"da","status":"in_progress","progress":"1/1"}"#,
+        );
+        assert_eq!(c.quests.len(), 1);
+        assert_eq!(c.quests[0].progress, "1/1");
+    }
+
+    #[test]
+    fn quest_completed_triggers_inventory_refresh() {
+        let (mut c, out) = client();
+        feed(
+            &mut c,
+            "QUEST npc.elder",
+            r#"OK {"quest_id":"quest.a","name":"A","description":"da","status":"completed","progress":"done"}"#,
+        );
+        assert_eq!(c.quests[0].status, "completed");
+        assert_eq!(out.try_recv().unwrap(), "INVENTORY");
+        assert_eq!(out.try_recv().unwrap(), "QUESTS");
+        assert!(out.try_recv().is_err());
+    }
+
+    #[test]
+    fn quest_without_optional_fields_still_parses() {
+        let (mut c, _out) = client();
+        feed(
+            &mut c,
+            "QUEST npc.elder",
+            r#"OK {"quest_id":"quest.a","status":"in_progress","progress":"0/1"}"#,
+        );
+        assert_eq!(c.quests.len(), 1);
+        assert!(c.quests[0].name.is_none());
+        assert!(c.quests[0].description.is_none());
+    }
+
+    #[test]
+    fn auto_refresh_sends_quests_after_ok() {
+        let (mut c, out) = client();
+        c.inventory = Vec::new();
+        feed(&mut c, "INVENTORY", r#"OK ["item.herbs"]"#);
+        assert_eq!(out.try_recv().unwrap(), "QUESTS");
+        assert!(out.try_recv().is_err());
+    }
+
+    #[test]
+    fn auto_refresh_skipped_during_combat() {
+        let (mut c, out) = client();
+        c.in_combat = true;
+        feed(
+            &mut c,
+            "STATUS",
+            r#"OK {"hp": 60, "max_hp": 100, "status": "in_combat"}"#,
+        );
+        assert_eq!(c.hp, 60);
+        assert!(out.try_recv().is_err());
+    }
+
+    #[test]
+    fn evt_group_invite_sets_banner() {
+        let (mut c, _out) = client();
+        c.apply(parse_line("EVT GROUP INVITE alice"));
+        assert_eq!(c.group_invite.as_deref(), Some("alice"));
+        assert!(last_log(&c).contains("alice"));
+    }
+
+    #[test]
+    fn newer_invite_overwrites_older() {
+        let (mut c, _out) = client();
+        c.apply(parse_line("EVT GROUP INVITE alice"));
+        c.apply(parse_line("EVT GROUP INVITE bob"));
+        assert_eq!(c.group_invite.as_deref(), Some("bob"));
+    }
+
+    #[test]
+    fn group_join_clears_invite() {
+        let (mut c, _out) = client();
+        c.group_invite = Some("alice".to_string());
+        feed(&mut c, "GROUP JOIN alice", "OK group=grp_9");
+        assert_eq!(c.group.as_deref(), Some("grp_9"));
+        assert!(c.group_invite.is_none());
     }
 }

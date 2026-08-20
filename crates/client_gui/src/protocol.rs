@@ -104,6 +104,7 @@ pub fn parse_line(line: &str) -> ServerMsg {
 pub struct StatusReply {
     pub hp: u32,
     pub max_hp: u32,
+    #[allow(dead_code)]
     pub status: String,
 }
 
@@ -129,6 +130,7 @@ pub struct WhoReply {
 
 #[derive(Debug, Deserialize)]
 pub struct CombatReply {
+    #[allow(dead_code)]
     pub action: String,
     pub attacker_hp: u32,
     pub target_hp: u32,

@@ -9,9 +9,7 @@ use std::time::Instant;
 mod protocol {
     pub mod command;
 }
-mod world_struct {
-    pub mod world_struct;
-}
+pub mod world_struct;
 
 pub struct Player {
     pub stream: Mutex<TcpStream>,
@@ -30,21 +28,116 @@ pub struct Player {
     pub invite_from: Option<String>,
     pub dialogue_progress: HashMap<String, usize>,
     pub command: u32,
-    pub time_command: Instant
+    pub time_command: Instant,
 }
 
 use protocol::command::{connect_user, disconnect_player, log, parse_command};
-use world_struct::world_struct::GameWorld;
+use world_struct::GameWorld;
 
 fn parse_world() -> GameWorld {
-    let world = fs::read_to_string("config/world.yaml").expect("Impossible de lire world.yaml");
-    let mut game_world: GameWorld = serde_yaml::from_str(&world).expect("ERROR SERDE");
+    let content = match fs::read_to_string("config/world.yaml") {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Cannot read config/world.yaml: {e}");
+            std::process::exit(1);
+        }
+    };
+    let mut game_world: GameWorld = match serde_yaml::from_str(&content) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("Invalid world.yaml: {e}");
+            std::process::exit(1);
+        }
+    };
     for npc in game_world.npcs.values_mut() {
         if npc.stats.max_hp == 0 {
             npc.stats.max_hp = npc.stats.hp;
         }
     }
+    validate_world(&game_world);
     game_world
+}
+
+fn validate_world(w: &GameWorld) {
+    let mut errors: Vec<String> = Vec::new();
+    if !w.world.locations.contains_key(&w.world.start_location) {
+        errors.push(format!(
+            "start_location '{}' does not exist",
+            w.world.start_location
+        ));
+    }
+    if !w.world.locations.contains_key(&w.world.respawn_location) {
+        errors.push(format!(
+            "respawn_location '{}' does not exist",
+            w.world.respawn_location
+        ));
+    }
+    for (id, loc) in &w.world.locations {
+        for (dir, dest) in &loc.exits {
+            if !w.world.locations.contains_key(dest) {
+                errors.push(format!(
+                    "exit '{dir}' of '{id}' points to unknown room '{dest}'"
+                ));
+            }
+        }
+        for item in &loc.items {
+            if !w.items.contains_key(item) {
+                errors.push(format!("room '{id}' contains unknown item '{item}'"));
+            }
+        }
+        for npc in &loc.npcs {
+            if !w.npcs.contains_key(npc) {
+                errors.push(format!("room '{id}' contains unknown npc '{npc}'"));
+            }
+        }
+    }
+    for (id, npc) in &w.npcs {
+        for quest in &npc.quests {
+            if !w.quests.contains_key(quest) {
+                errors.push(format!("npc '{id}' offers unknown quest '{quest}'"));
+            }
+        }
+    }
+    for (id, quest) in &w.quests {
+        if !w.npcs.contains_key(&quest.giver) {
+            errors.push(format!(
+                "quest '{id}' giver '{}' does not exist",
+                quest.giver
+            ));
+        }
+        if let Some(item) = &quest.objective.item {
+            if !w.items.contains_key(item) {
+                errors.push(format!(
+                    "quest '{id}' objective item '{item}' does not exist"
+                ));
+            }
+        }
+        if let Some(target) = &quest.objective.target {
+            if !w.npcs.contains_key(target) {
+                errors.push(format!(
+                    "quest '{id}' objective target '{target}' does not exist"
+                ));
+            }
+        }
+        if let Some(npc) = &quest.objective.deliver_to {
+            if !w.npcs.contains_key(npc) {
+                errors.push(format!("quest '{id}' deliver_to '{npc}' does not exist"));
+            }
+        }
+        if !w.items.contains_key(&quest.reward.item) {
+            errors.push(format!(
+                "quest '{id}' reward item '{}' does not exist",
+                quest.reward.item
+            ));
+        }
+    }
+    if !errors.is_empty() {
+        eprintln!("world.yaml validation failed:");
+        for e in &errors {
+            eprintln!("  - {e}");
+        }
+        std::process::exit(1);
+    }
 }
 
 fn lunch(
@@ -107,7 +200,7 @@ fn lunch(
         parse_command(&line, &mut stream, &players, &name, &world, &next_group_id);
     }
     if is_connect {
-        disconnect_player(&name, &players);
+        disconnect_player(&name, &players, &world);
     }
     log(
         "INFO",
@@ -117,7 +210,13 @@ fn lunch(
 }
 
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:8080").expect("failde to bind");
+    let listener = match TcpListener::bind("127.0.0.1:8080") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Cannot bind 127.0.0.1:8080: {e}");
+            std::process::exit(1);
+        }
+    };
     let game_world = Arc::new(Mutex::new(parse_world()));
     let spawn_room = game_world.lock().unwrap().world.start_location.clone();
     println!("Server run");
@@ -141,7 +240,7 @@ fn main() {
                 });
             }
             Err(e) => {
-                eprintln!("Failde to conection: {}", e);
+                eprintln!("Failed to accept connection: {e}");
             }
         }
     }
