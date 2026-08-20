@@ -362,15 +362,17 @@ impl TapClient {
                         ui.label(format!("- {}", log));
                     }
                 });
+            let cmd_response =
+                ui.add(egui::TextEdit::singleline(&mut self.cmd_input).char_limit(200));
+
+            if cmd_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if !self.cmd_input.trim().is_empty() {
+                    pending = Some(self.cmd_input.to_string());
+                }
+                self.cmd_input.clear();
+            }
         });
 
-        let cmd_response = ui.add(egui::TextEdit::singleline(&mut self.cmd_input).char_limit(200));
-
-        if cmd_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            if !self.cmd_input.trim().is_empty() {
-                pending = Some(self.cmd_input.to_string());
-            }
-        }
         if let Some(cmd) = pending {
             self.send_command(cmd);
         }
