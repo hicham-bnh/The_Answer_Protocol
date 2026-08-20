@@ -6,11 +6,19 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
-pub fn start(address: String, tx: Sender<String>, rx_out: Receiver<String>, ctx: egui::Context) {
+pub fn start(
+    address: String,
+    tx: Sender<String>,
+    rx_out: Receiver<String>,
+    ctx: egui::Context,
+    init_tx: Sender<()>,
+) {
     thread::spawn(move || loop {
         match TcpStream::connect(&address) {
             Ok(stream) => {
                 println!("Connected !");
+
+                let _ = init_tx.send(());
 
                 let mut stream_out = stream.try_clone().expect("Error creating output stream");
 

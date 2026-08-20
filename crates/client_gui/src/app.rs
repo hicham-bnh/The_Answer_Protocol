@@ -33,6 +33,7 @@ pub struct TapClient {
     logs: Vec<String>,
     active_tab: ChatTab,
     chat_input: String,
+    cmd_input: String,
     pending_cmds: VecDeque<String>,
     rx: Receiver<String>,
     tx_out: Sender<String>,
@@ -67,6 +68,7 @@ impl TapClient {
             logs: Vec::new(),
             active_tab: ChatTab::default(),
             chat_input: String::new(),
+            cmd_input: String::new(),
             pending_cmds: VecDeque::new(),
             rx,
             tx_out,
@@ -350,6 +352,8 @@ impl TapClient {
     }
 
     fn right_panel(&mut self, ui: &mut egui::Ui) {
+        let mut pending: Option<String> = None;
+
         egui::Panel::right("log_list").show(ui, |ui| {
             egui::ScrollArea::vertical()
                 .stick_to_bottom(true)
@@ -358,7 +362,20 @@ impl TapClient {
                         ui.label(format!("- {}", log));
                     }
                 });
+            let cmd_response =
+                ui.add(egui::TextEdit::singleline(&mut self.cmd_input).char_limit(200));
+
+            if cmd_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if !self.cmd_input.trim().is_empty() {
+                    pending = Some(self.cmd_input.to_string());
+                }
+                self.cmd_input.clear();
+            }
         });
+
+        if let Some(cmd) = pending {
+            self.send_command(cmd);
+        }
     }
 
     fn bottom_panel(&mut self, ui: &mut egui::Ui) {
